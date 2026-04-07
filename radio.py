@@ -77,19 +77,22 @@ def broadcaster() -> None:
             shutdown_event.wait(10)
             continue
 
+        # Предзагрузка: читаем метаданные ПЕРЕД началом стрима
+        # Чтобы между треками не было задержки на чтение тегов
+        prepared = []
         for filename in playlist:
-            if shutdown_event.is_set():
-                break
-
             filepath = os.path.join(MUSIC_DIR, filename)
-
-            # Читаем метаданные до начала стрима
             try:
                 audio_info = MP3(filepath)
-                bitrate    = audio_info.info.bitrate  # бит/с
+                bitrate = audio_info.info.bitrate
             except Exception as e:
                 print(f"[radio] Не удалось прочитать {filename}: {e}")
                 bitrate = 128_000
+            prepared.append((filename, filepath, bitrate))
+
+        for filename, filepath, bitrate in prepared:
+            if shutdown_event.is_set():
+                break
 
             current_song["title"]   = clean_title(filename)
             current_song["bitrate"] = bitrate // 1000
@@ -107,6 +110,9 @@ def broadcaster() -> None:
                     while not shutdown_event.is_set():
                         chunk = f.read(CHUNK)
                         if not chunk:
+                            # Файл закончился — минимальная пауза перед следующим треком
+                            # чтобы клиенты успели получить последний чанк
+                            shutdown_event.wait(0.01)
                             break
 
                         # Копируем список под локом, рассылаем без лока
@@ -161,13 +167,18 @@ def stream():
 
     def generate():
         try:
+            consecutive_empty = 0
+            max_consecutive_empty = 400  # ~20 сек без данных = отключение
             while not shutdown_event.is_set():
                 try:
-                    # Маленький timeout = быстрый отклик на новые чанки
-                    # 0.05 с вместо 1.0 с → нет секундных пауз между чанками
                     chunk = client_q.get(timeout=0.05)
+                    consecutive_empty = 0
                     yield chunk
                 except queue.Empty:
+                    consecutive_empty += 1
+                    if consecutive_empty >= max_consecutive_empty:
+                        print("[radio] Клиент не получил данных 20 сек, отключение")
+                        break
                     continue
         finally:
             with clients_lock:
