@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MLP Radio</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+    font-family: 'Segoe UI', sans-serif; color: #fff;
+  }
+  .player {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    border-radius: 24px; padding: 40px;
+    text-align: center; min-width: 380px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .icon { font-size: 64px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin-bottom: 8px; }
+  #track {
+    font-size: 16px; color: #a8b2d1; margin-bottom: 24px;
+    min-height: 24px; transition: opacity 0.3s;
+  }
+
+  .controls {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; margin-bottom: 16px;
+  }
+  .btn {
+    width: 56px; height: 56px; border-radius: 50%;
+    border: none; background: rgba(255,255,255,0.15);
+    color: #fff; font-size: 24px; cursor: pointer;
+    transition: background 0.2s, transform 0.1s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .btn:hover { background: rgba(255,255,255,0.25); }
+  .btn:active { transform: scale(0.92); }
+  .btn.playing { background: rgba(100,255,218,0.25); }
+
+  .volume-wrap {
+    display: flex; align-items: center; gap: 8px;
+    justify-content: center; margin-bottom: 20px;
+  }
+  .vol-btn {
+    width: 36px; height: 36px; border-radius: 10px;
+    border: none; background: rgba(255,255,255,0.12);
+    color: #fff; font-size: 18px; font-weight: bold;
+    cursor: pointer; transition: background 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vol-btn:hover { background: rgba(255,255,255,0.22); }
+  .vol-btn:active { transform: scale(0.9); }
+  #volDisplay {
+    min-width: 36px; text-align: center;
+    font-size: 14px; color: #a8b2d1;
+  }
+
+  .status-badge {
+    display: inline-block; padding: 4px 12px;
+    border-radius: 12px; font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .status-badge.live { background: rgba(255,60,60,0.3); color: #ff6b6b; }
+  .status-badge.offline { background: rgba(255,255,255,0.1); color: #888; }
+
+  .stats { font-size: 12px; color: #556; }
+</style>
+</head>
+<body>
+<div class="player">
+  <div class="icon">📻</div>
+  <h1>MLP Radio</h1>
+  <div class="status-badge offline" id="badge">OFFLINE</div>
+  <div id="track">Загрузка...</div>
+
+  <div class="controls">
+    <button class="btn" id="playBtn" title="Play / Pause">▶</button>
+  </div>
+
+  <div class="volume-wrap">
+    <button class="vol-btn" id="volDown">−</button>
+    <span id="volDisplay">70</span>
+    <button class="vol-btn" id="volUp">+</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+</div>
+
+<!-- Скрытый аудио — НИКАКОГО UI -->
+<audio id="audio" preload="none" style="position:absolute;width:0;height:0;opacity:0;pointer-events:none;"></audio>
+
+<script>
+const audioEl  = document.getElementById('audio');
+const trackEl  = document.getElementById('track');
+const playBtn  = document.getElementById('playBtn');
+const volDown  = document.getElementById('volDown');
+const volUp    = document.getElementById('volUp');
+const volDisplay = document.getElementById('volDisplay');
+const badge    = document.getElementById('badge');
+const statsEl  = document.getElementById('stats');
+
+let isPlaying = false;
+let volume = 70;
+
+function setVol(v) {
+  volume = Math.max(0, Math.min(100, v));
+  volDisplay.textContent = volume;
+  audioEl.volume = volume / 100;
+}
+
+volDown.addEventListener('click', () => setVol(volume - 10));
+volUp.addEventListener('click', () => setVol(volume + 10));
+setVol(volume);
+
+playBtn.addEventListener('click', () => {
+  if (isPlaying) {
+    audioEl.pause();
+    audioEl.src = '';
+    isPlaying = false;
+    playBtn.textContent = '▶';
+    playBtn.classList.remove('playing');
+    badge.textContent = 'OFFLINE';
+    badge.className = 'status-badge offline';
+  } else {
+    connectStream();
+  }
+});
+
+function connectStream() {
+  audioEl.src = '/stream';
+  audioEl.onplaying = () => {
+    isPlaying = true;
+    playBtn.textContent = '⏸';
+    playBtn.classList.add('playing');
+    badge.textContent = 'LIVE';
+    badge.className = 'status-badge live';
+  };
+  audioEl.onended = () => { connectStream(); };
+  audioEl.onerror = () => {
+    if (isPlaying) {
+      setTimeout(() => connectStream(), 1000);
+    }
+  };
+  audioEl.play();
+}
+
+// SSE — название трека
+const es = new EventSource('/title-stream');
+es.onmessage = (e) => { trackEl.textContent = e.data; };
+es.onerror = () => {};
+
+// Статус
+async function updateStats() {
+  try {
+    const r = await fetch('/status');
+    const d = await r.json();
+    statsEl.textContent = `Слушателей: ${d.listeners} · ${d.bitrate} kbps`;
+  } catch {}
+}
+setInterval(updateStats, 10000);
+updateStats();
+</script>
+</body>
+</html>

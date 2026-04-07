@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сейчас играет</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  #wrapper {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 32px;
+  }
+  #icon {
+    color: #ffffff;
+    font-size: 2rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  #title {
+    color: #ffffff;
+    font-size: 2rem;
+    font-weight: 600;
+    transition: opacity 0.3s ease;
+  }
+</style>
+</head>
+<body>
+  <div id="wrapper">
+    <div id="icon">♫</div>
+    <div id="title">Загрузка...</div>
+  </div>
+
+  <script>
+    const el = document.getElementById('title');
+
+    async function update() {
+      try {
+        const res = await fetch('/title');
+        const text = await res.text();
+        if (text && el.textContent !== text) {
+          el.style.opacity = '0';
+          setTimeout(() => {
+            el.textContent = text;
+            el.style.opacity = '1';
+          }, 300);
+        }
+      } catch (_) {}
+    }
+
+    update();
+    setInterval(update, 3000);
+  </script>
+</body>
+</html>
