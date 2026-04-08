@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Сейчас играет</title>
+<title id="pageTitle">Сейчас играет</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -40,7 +40,32 @@
   </div>
 
   <script>
+    // ─── Localization ────────────────────────────────────────
+    function detectLanguage() {
+      const nav = navigator.language || navigator.userLanguage || '';
+      return nav.toLowerCase().startsWith('ru') ? 'ru' : 'en';
+    }
+
+    const LANG = detectLanguage();
+    document.documentElement.lang = LANG;
+
+    const i18n = {
+      ru: {
+        title: 'Сейчас играет',
+        loading: 'Загрузка...'
+      },
+      en: {
+        title: 'Now Playing',
+        loading: 'Loading...'
+      }
+    };
+
+    const t = (key) => i18n[LANG][key] || i18n.en[key] || key;
+
+    document.getElementById('pageTitle').textContent = t('title');
+
     const el = document.getElementById('title');
+    el.textContent = t('loading');
 
     async function update() {
       try {
