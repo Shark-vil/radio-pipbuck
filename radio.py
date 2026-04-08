@@ -6,6 +6,7 @@ import re
 import random
 import threading
 import queue
+import collections
 import time
 import signal
 import sys
@@ -21,6 +22,10 @@ PORT       = int(os.environ.get("PORT", 8000))
 # 4096 байт при 128 kbps → отправка каждые ~0.25 сек (вместо ~1 сек при 16 KB)
 CHUNK      = 4096
 QUEUE_SIZE = 512   # ~2 MB буфер на клиента — достаточно для YouTube-ингеста
+
+# Пребуфер для новых клиентов: ~10 сек аудио при 192 kbps
+# Новый клиент сразу получает этот буфер и избавляется от статтеров при старте
+PREBUFFER_MAX_BYTES = 256_000  # ~10 сек при 192 kbps, ~16 сек при 128 kbps
 # ──────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -44,6 +49,12 @@ next_queue_ready = threading.Event()  # Сигнал: следующая оче�
 # Предотвращение двойного запуска генерации очереди
 _queue_generation_in_progress = False
 _queue_gen_lock = threading.Lock()
+
+# Кольцевой пребуфер: хранит последние PREBUFFER_MAX_BYTES байт аудио
+# Новые клиенты сразу получают этот буфер, что устраняет статтеры при старте
+_audio_prebuffer: collections.deque = collections.deque()
+_audio_prebuffer_size: int = 0
+_audio_prebuffer_lock = threading.Lock()
 
 
 # ─── Утилиты ──────────────────────────────────────────────────
@@ -209,6 +220,14 @@ def broadcaster() -> None:
                                         clients.remove(dead_q)
                             print(f"[radio] Дроп медленных клиентов: {len(dead_clients)}")
 
+                        # Записываем чанк в пребуфер для новых клиентов
+                        with _audio_prebuffer_lock:
+                            _audio_prebuffer.append(chunk)
+                            _audio_prebuffer_size += len(chunk)
+                            while _audio_prebuffer_size > PREBUFFER_MAX_BYTES:
+                                removed = _audio_prebuffer.popleft()
+                                _audio_prebuffer_size -= len(removed)
+
                         bytes_sent += len(chunk)
 
                         expected = bytes_sent / bytes_per_sec
@@ -268,10 +287,23 @@ def index():
 def stream():
     client_q: queue.Queue = queue.Queue(maxsize=QUEUE_SIZE)
 
+    # Снимаем снапшот пребуфера ДО добавления клиента в список,
+    # чтобы не получить дубли от broadcaster'а
+    with _audio_prebuffer_lock:
+        prebuffer_snapshot = list(_audio_prebuffer)
+
     with clients_lock:
         clients.append(client_q)
 
-    print(f"[radio] + Слушатель (всего: {len(clients)})")
+    # Мгновенно отдаём новому клиенту последние ~10 сек аудио.
+    # Браузер накапливает буфер до начала воспроизведения → нет статтеров.
+    for cached_chunk in prebuffer_snapshot:
+        try:
+            client_q.put_nowait(cached_chunk)
+        except queue.Full:
+            break
+
+    print(f"[radio] + Слушатель (всего: {len(clients)}, пребуфер: {len(prebuffer_snapshot)} чанков)")
 
     def generate():
         try:
