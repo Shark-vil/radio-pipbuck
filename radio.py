@@ -9,7 +9,7 @@ import queue
 import time
 import signal
 import sys
-from flask import Flask, Response, render_template
+from flask import Flask, Response, render_template, jsonify
 from mutagen.mp3 import MP3
 
 # ─── Настройки ────────────────────────────────────────────────
@@ -277,6 +277,44 @@ def status():
             'Access-Control-Allow-Origin': '*',
         }
     )
+
+
+@app.route('/playlist')
+def playlist():
+    """Возвращает текущий трек, очередь и полный список песен."""
+    try:
+        all_songs = [f for f in os.listdir(MUSIC_DIR) if f.lower().endswith('.mp3')]
+        all_songs.sort(key=lambda f: clean_title(f).lower())
+        
+        songs_data = []
+        for filename in all_songs:
+            songs_data.append({
+                "filename": filename,
+                "title": clean_title(filename)
+            })
+        
+        return (
+            {
+                "current": current_song["title"],
+                "queue": [],  # Очередь будет пуста, т.к. трек выбирается случайно
+                "all_songs": songs_data,
+                "total": len(songs_data)
+            },
+            200,
+            {
+                'Content-Type':              'application/json',
+                'Access-Control-Allow-Origin': '*',
+            }
+        )
+    except FileNotFoundError:
+        return (
+            {"error": "Music directory not found"},
+            404,
+            {
+                'Content-Type':              'application/json',
+                'Access-Control-Allow-Origin': '*',
+            }
+        )
 
 
 # ─── Запуск ───────────────────────────────────────────────────
