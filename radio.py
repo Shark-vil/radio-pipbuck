@@ -155,7 +155,7 @@ def build_prepared_queue() -> list:
 # ─── Broadcaster ──────────────────────────────────────────────
 
 def broadcaster() -> None:
-    global play_queue, queue_index, _queue_generation_in_progress
+    global play_queue, queue_index, _queue_generation_in_progress, _audio_prebuffer_size
 
     print(f"[radio] Стрим запущен. Папка: {MUSIC_DIR}")
 
