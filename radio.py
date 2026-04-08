@@ -31,6 +31,20 @@ title_listeners: list = []
 clients_lock          = threading.Lock()
 shutdown_event        = threading.Event()
 
+# Кэш списка песен (сканируем файловую систему один раз)
+song_cache: list[dict] = []
+song_cache_lock = threading.Lock()
+
+# Очередь воспроизведения и управление следующей очередью
+play_queue: list = []          # Текущая очередь треков
+queue_lock = threading.Lock()
+queue_index = 0                # Индекс текущего трека в очереди
+next_queue_ready = threading.Event()  # Сигнал: следующая очередь готова
+
+# Предотвращение двойного запуска генерации очереди
+_queue_generation_in_progress = False
+_queue_gen_lock = threading.Lock()
+
 
 # ─── Утилиты ──────────────────────────────────────────────────
 
@@ -55,67 +69,105 @@ def clean_title(filename: str) -> str:
     return name
 
 
-def get_playlist() -> list[str]:
+def refresh_song_cache() -> list[dict]:
+    """Сканирует MUSIC_DIR и возвращает отсортированный список песен. Кэширует результат."""
     try:
         files = [f for f in os.listdir(MUSIC_DIR) if f.lower().endswith('.mp3')]
-        random.shuffle(files)
-        return files
+        files.sort(key=lambda f: clean_title(f).lower())
+        cached = [{"filename": f, "title": clean_title(f)} for f in files]
+        with song_cache_lock:
+            song_cache.clear()
+            song_cache.extend(cached)
+        return cached
     except FileNotFoundError:
         print(f"[radio] Папка не найдена: {MUSIC_DIR}")
+        with song_cache_lock:
+            song_cache.clear()
         return []
+
+
+def get_song_cache() -> list[dict]:
+    """Возвращает кэшированный список песен. Если пуст — сканирует."""
+    with song_cache_lock:
+        if not song_cache:
+            return refresh_song_cache()
+        return list(song_cache)
+
+
+def build_prepared_queue() -> list:
+    """Создаёт перемешанную очередь треков с предзагруженными метаданными."""
+    cached = get_song_cache()
+    if not cached:
+        return []
+
+    filenames = [s["filename"] for s in cached]
+    random.shuffle(filenames)
+
+    prepared = []
+    for filename in filenames:
+        filepath = os.path.join(MUSIC_DIR, filename)
+        try:
+            audio_info = MP3(filepath)
+            bitrate = audio_info.info.bitrate
+        except Exception as e:
+            print(f"[radio] Не удалось прочитать {filename}: {e}")
+            bitrate = 128_000
+        prepared.append((filename, filepath, bitrate))
+
+    return prepared
 
 
 # ─── Broadcaster ──────────────────────────────────────────────
 
 def broadcaster() -> None:
+    global play_queue, queue_index, _queue_generation_in_progress
+
     print(f"[radio] Стрим запущен. Папка: {MUSIC_DIR}")
 
+    # Инициализация: кэшируем песни и создаём первую очередь
+    refresh_song_cache()
+    play_queue = build_prepared_queue()
+    next_queue_ready.clear()
+
     while not shutdown_event.is_set():
-        playlist = get_playlist()
-        if not playlist:
+        if not play_queue:
             print("[radio] Нет MP3-файлов, жду 10 сек...")
             shutdown_event.wait(10)
+            refresh_song_cache()
+            play_queue = build_prepared_queue()
             continue
 
-        # Предзагрузка: читаем метаданные ПЕРЕД началом стрима
-        # Чтобы между треками не было задержки на чтение тегов
-        prepared = []
-        for filename in playlist:
-            filepath = os.path.join(MUSIC_DIR, filename)
-            try:
-                audio_info = MP3(filepath)
-                bitrate = audio_info.info.bitrate
-            except Exception as e:
-                print(f"[radio] Не удалось прочитать {filename}: {e}")
-                bitrate = 128_000
-            prepared.append((filename, filepath, bitrate))
-
-        for filename, filepath, bitrate in prepared:
+        for queue_index in range(len(play_queue)):
             if shutdown_event.is_set():
                 break
 
+            filename, filepath, bitrate = play_queue[queue_index]
+
+            # Если это предпоследний трек — запускаем генерацию следующей очереди в фоне
+            if queue_index == len(play_queue) - 2 and len(play_queue) >= 2:
+                with _queue_gen_lock:
+                    if not _queue_generation_in_progress and not next_queue_ready.is_set():
+                        _queue_generation_in_progress = True
+                        threading.Thread(target=_prepare_next_queue_safe, daemon=True).start()
+
             current_song["title"]   = clean_title(filename)
             current_song["bitrate"] = bitrate // 1000
-            print(f"[radio] ▶ {current_song['title']}  [{current_song['bitrate']} kbps]")
+            print(f"[radio] ▶ {current_song['title']}  [{current_song['bitrate']} kbps  ({queue_index + 1}/{len(play_queue)})]")
             notify_title_change()
 
             bytes_per_sec = bitrate / 8  # байт/с
 
             try:
                 with open(filepath, 'rb') as f:
-                    # Точный таймер — не сбрасывается между чанками
                     start_time = time.perf_counter()
                     bytes_sent = 0
 
                     while not shutdown_event.is_set():
                         chunk = f.read(CHUNK)
                         if not chunk:
-                            # Файл закончился — минимальная пауза перед следующим треком
-                            # чтобы клиенты успели получить последний чанк
                             shutdown_event.wait(0.01)
                             break
 
-                        # Копируем список под локом, рассылаем без лока
                         with clients_lock:
                             snapshot = list(clients)
 
@@ -135,8 +187,6 @@ def broadcaster() -> None:
 
                         bytes_sent += len(chunk)
 
-                        # Точный контроль темпа через perf_counter
-                        # Маленький drift (0.02 с) = минимальный джиттер
                         expected = bytes_sent / bytes_per_sec
                         elapsed  = time.perf_counter() - start_time
                         drift    = expected - elapsed
@@ -146,7 +196,41 @@ def broadcaster() -> None:
             except Exception as e:
                 print(f"[radio] Ошибка при чтении {filename}: {e}")
 
+        # Очередь закончилась — ждём, пока следующая будет готова
+        if not shutdown_event.is_set():
+            print("[radio] Очередь закончилась, жду следующую...")
+            while not shutdown_event.is_set() and not next_queue_ready.is_set():
+                shutdown_event.wait(0.5)
+
+            if shutdown_event.is_set():
+                break
+
+            with queue_lock:
+                pass  # play_queue уже обновлён в _prepare_next_queue_safe
+            next_queue_ready.clear()
+            queue_index = 0
+            print(f"[radio] Новая очередь готова ({len(play_queue)} треков)")
+
     print("[radio] Broadcaster остановлен.")
+
+
+def _prepare_next_queue_safe() -> None:
+    """Генерирует следующую очередь в фоновом потоке (с safe-флагом)."""
+    global play_queue, _queue_generation_in_progress
+
+    try:
+        print("[radio] Генерация следующей очереди...")
+        new_queue = build_prepared_queue()
+        if new_queue:
+            with queue_lock:
+                play_queue = new_queue
+                next_queue_ready.set()
+            print(f"[radio] Следующая очередь готова ({len(new_queue)} треков)")
+        else:
+            print("[radio] Не удалось создать следующую очередь (нет файлов?)")
+    finally:
+        with _queue_gen_lock:
+            _queue_generation_in_progress = False
 
 
 # ─── Роуты ────────────────────────────────────────────────────
@@ -282,39 +366,36 @@ def status():
 @app.route('/playlist')
 def playlist():
     """Возвращает текущий трек, очередь и полный список песен."""
-    try:
-        all_songs = [f for f in os.listdir(MUSIC_DIR) if f.lower().endswith('.mp3')]
-        all_songs.sort(key=lambda f: clean_title(f).lower())
-        
-        songs_data = []
-        for filename in all_songs:
-            songs_data.append({
-                "filename": filename,
-                "title": clean_title(filename)
+    all_songs = get_song_cache()
+
+    # Формируем очередь: треки от текущего до конца
+    with queue_lock:
+        current_idx = queue_index
+        queue_snapshot = list(play_queue)
+
+    upcoming = []
+    for i, (filename, filepath, bitrate) in enumerate(queue_snapshot):
+        if i >= current_idx:
+            upcoming.append({
+                "title": clean_title(filename),
+                "position": i - current_idx + 1  # 1 = сейчас играет, 2 = следующий, и т.д.
             })
-        
-        return (
-            {
-                "current": current_song["title"],
-                "queue": [],  # Очередь будет пуста, т.к. трек выбирается случайно
-                "all_songs": songs_data,
-                "total": len(songs_data)
-            },
-            200,
-            {
-                'Content-Type':              'application/json',
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
-    except FileNotFoundError:
-        return (
-            {"error": "Music directory not found"},
-            404,
-            {
-                'Content-Type':              'application/json',
-                'Access-Control-Allow-Origin': '*',
-            }
-        )
+
+    return (
+        {
+            "current": current_song["title"],
+            "queue": upcoming,
+            "all_songs": all_songs,
+            "total": len(all_songs),
+            "queue_position": current_idx + 1,
+            "queue_total": len(queue_snapshot)
+        },
+        200,
+        {
+            'Content-Type':              'application/json',
+            'Access-Control-Allow-Origin': '*',
+        }
+    )
 
 
 # ─── Запуск ───────────────────────────────────────────────────

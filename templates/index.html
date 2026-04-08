@@ -218,6 +218,42 @@
     line-height: 1.5;
   }
 
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .queue-item {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.04);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .queue-item.current {
+    background: rgba(100,255,218,0.12);
+  }
+  .queue-pos {
+    font-size: 12px;
+    color: #556;
+    min-width: 28px;
+    text-align: center;
+  }
+  .queue-item.current .queue-pos {
+    color: #64ffda;
+    font-weight: 600;
+  }
+  .queue-title {
+    font-size: 13px;
+    color: #a8b2d1;
+  }
+  .queue-item.current .queue-title {
+    color: #fff;
+    font-weight: 500;
+  }
+
   .loading {
     text-align: center;
     padding: 40px;
@@ -291,8 +327,10 @@
         <div class="loading">Загрузка...</div>
       </div>
       <div class="queue-info">
-        <h3>Очередь воспроизведения</h3>
-        <p class="queue-note">Песни выбираются случайным образом из всей коллекции</p>
+        <h3>Очередь воспроизведения (<span id="queueCount">0</span>)</h3>
+        <div id="queueList" class="queue-list">
+          <div class="loading">Загрузка...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -380,6 +418,8 @@ const overlay = document.getElementById('overlay');
 const songsList = document.getElementById('songsList');
 const currentSong = document.getElementById('currentSong');
 const totalCount = document.getElementById('totalCount');
+const queueCount = document.getElementById('queueCount');
+const queueList = document.getElementById('queueList');
 const searchInput = document.getElementById('searchInput');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
@@ -417,19 +457,22 @@ tabBtns.forEach(btn => {
 
 async function loadPlaylist() {
   if (playlistData) return; // Already loaded
-  
+
   try {
     const r = await fetch('/playlist');
     playlistData = await r.json();
-    
+
     totalCount.textContent = playlistData.total;
+    queueCount.textContent = playlistData.queue.length - 1; // -1 т.к. первый = текущий
     filteredSongs = playlistData.all_songs;
-    
+
     renderSongsList(filteredSongs);
     renderCurrentSong();
+    renderQueue();
   } catch (e) {
     songsList.innerHTML = '<div class="loading">Ошибка загрузки</div>';
     currentSong.innerHTML = '<div class="loading">Ошибка загрузки</div>';
+    queueList.innerHTML = '<div class="loading">Ошибка загрузки</div>';
   }
 }
 
@@ -455,6 +498,24 @@ function renderCurrentSong() {
     <div class="playing-icon">🎵</div>
     <h3>${playlistData.current}</h3>
   `;
+}
+
+function renderQueue() {
+  if (!playlistData.queue || !playlistData.queue.length) {
+    queueList.innerHTML = '<div class="loading">Очередь пуста</div>';
+    return;
+  }
+
+  queueList.innerHTML = playlistData.queue.map(item => {
+    const isCurrent = item.position === 1;
+    const posLabel = isCurrent ? '▶' : `${item.position}`;
+    return `
+      <div class="queue-item ${isCurrent ? 'current' : ''}">
+        <span class="queue-pos">${posLabel}</span>
+        <span class="queue-title">${item.title}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 // Search functionality
