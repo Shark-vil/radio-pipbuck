@@ -1,7 +1,9 @@
 # radio.py
-# pip install flask mutagen flask-minify
+# pip install flask mutagen flask-minify python-dotenv
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import re
 import random
 import threading
@@ -15,9 +17,10 @@ from flask_minify import Minify
 from mutagen.mp3 import MP3
 
 # ─── Настройки ────────────────────────────────────────────────
-MUSIC_DIR  = os.environ.get("MUSIC_DIR", r"D:\mlpStream")
-HOST       = "0.0.0.0"
-PORT       = int(os.environ.get("PORT", 8000))
+MUSIC_DIR    = os.environ.get("MUSIC_DIR", r"D:\mlpStream")
+HOST         = "0.0.0.0"
+PORT         = int(os.environ.get("PORT", 8000))
+TITLE_DELAY  = float(os.environ.get("TITLE_DELAY_SECONDS", "5"))  # 0 = без задержки
 
 # Маленький чанк = гранулярная отправка = плавный поток без статтеров
 # 4096 байт при 128 kbps → отправка каждые ~0.25 сек (вместо ~1 сек при 16 KB)
@@ -190,7 +193,10 @@ def broadcaster() -> None:
             current_song["title"]   = clean_title(filename)
             current_song["bitrate"] = bitrate // 1000
             print(f"[radio] ▶ {current_song['title']}  [{current_song['bitrate']} kbps  ({queue_index + 1}/{len(play_queue)})]")
-            notify_title_change()
+            if TITLE_DELAY > 0:
+                threading.Timer(TITLE_DELAY, notify_title_change).start()
+            else:
+                notify_title_change()
 
             bytes_per_sec = bitrate / 8  # байт/с
 
