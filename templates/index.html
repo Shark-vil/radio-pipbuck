@@ -300,98 +300,9 @@
     opacity: 1;
     pointer-events: auto;
   }
-
-  /* Cookie Consent Banner — FULL SCREEN */
-  .cookie-banner {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0,0,0,0.85);
-    backdrop-filter: blur(8px);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: opacity 0.4s;
-  }
-  .cookie-banner.hidden {
-    opacity: 0;
-    pointer-events: none;
-  }
-  .cookie-dialog {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 24px;
-    padding: 48px 40px;
-    max-width: 560px;
-    width: 90vw;
-    text-align: center;
-    box-shadow: 0 16px 64px rgba(0,0,0,0.5);
-  }
-  .cookie-icon { font-size: 56px; margin-bottom: 20px; }
-  .cookie-dialog h2 {
-    font-size: 24px;
-    margin-bottom: 16px;
-    color: #fff;
-  }
-  .cookie-dialog p {
-    font-size: 15px;
-    color: #a8b2d1;
-    line-height: 1.6;
-    margin-bottom: 12px;
-  }
-  .cookie-dialog .cookie-highlight {
-    background: rgba(100,255,218,0.08);
-    border: 1px solid rgba(100,255,218,0.2);
-    border-radius: 12px;
-    padding: 14px 18px;
-    margin: 20px 0;
-    font-size: 14px;
-    color: #64ffda;
-  }
-  .cookie-btns {
-    display: flex;
-    gap: 12px;
-    margin-top: 28px;
-    justify-content: center;
-  }
-  .cookie-btn {
-    padding: 14px 32px;
-    border-radius: 14px;
-    border: none;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .cookie-btn.accept {
-    background: linear-gradient(135deg, #64ffda, #48c9b0);
-    color: #1a1a2e;
-  }
-  .cookie-btn.accept:hover { transform: scale(1.04); }
-  .cookie-btn.decline {
-    background: rgba(255,255,255,0.1);
-    color: #a8b2d1;
-  }
-  .cookie-btn.decline:hover { background: rgba(255,255,255,0.18); }
 </style>
 </head>
 <body>
-
-<!-- Cookie Consent Banner -->
-<div id="cookieBanner" class="cookie-banner hidden">
-  <div class="cookie-dialog">
-    <div class="cookie-icon">🍪</div>
-    <h2 id="cookieTitle"></h2>
-    <p id="cookieDesc"></p>
-    <div class="cookie-highlight" id="cookieHighlight"></div>
-    <div class="cookie-btns">
-      <button class="cookie-btn decline" id="cookieDecline"></button>
-      <button class="cookie-btn accept" id="cookieAccept"></button>
-    </div>
-  </div>
-</div>
 
 <div class="player">
   <div class="icon">📻</div>
@@ -481,13 +392,6 @@ const i18n = {
     allSongs: 'Все песни',
     nowPlaying: 'Сейчас играет',
     queueTitle: 'Очередь воспроизведения',
-    queueNote: 'Песни выбираются случайным образом из всей коллекции',
-    cookieTitle: '🍪 Мы используем cookie',
-    cookieDesc: 'Этот сайт использует файлы cookie для сохранения ваших настроек. Это позволяет запомнить выбранную громкость, чтобы вам не приходилось настраивать её при каждом посещении.',
-    cookieHighlight: '🔒 Cookie используются ТОЛЬКО для сохранения громкости. Мы не отслеживаем вашу активность, не собираем персональные данные и не передаём информацию третьим лицам.',
-    cookieAccept: 'Принять',
-    cookieDecline: 'Отклонить',
-    volIcon: '🔊',
     page_title: 'MLP Radio'
   },
   en: {
@@ -503,13 +407,6 @@ const i18n = {
     allSongs: 'All Songs',
     nowPlaying: 'Now Playing',
     queueTitle: 'Playback Queue',
-    queueNote: 'Songs are chosen randomly from the entire collection',
-    cookieTitle: '🍪 We Use Cookies',
-    cookieDesc: 'This site uses cookies to save your preferences. This allows us to remember your volume setting so you don\'t have to adjust it every time you visit.',
-    cookieHighlight: '🔒 Cookies are used ONLY to save volume settings. We do not track your activity, collect personal data, or share information with third parties.',
-    cookieAccept: 'Accept',
-    cookieDecline: 'Decline',
-    volIcon: '🔊',
     page_title: 'MLP Radio'
   }
 };
@@ -518,54 +415,10 @@ function t(key) {
   return i18n[LANG][key] || i18n.en[key] || key;
 }
 
-// Apply translations
 document.documentElement.lang = LANG;
 document.title = t('page_title');
 
-// ─── Cookie Consent ──────────────────────────────────────────
-let cookiesAllowed = true; // Default: allow until user decides
-
-function getCookie(name) {
-  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-  return match ? match[2] : null;
-}
-
-function setCookie(name, value, days) {
-  const d = new Date();
-  d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
-  document.cookie = name + '=' + value + ';expires=' + d.toUTCString() + ';path=/;SameSite=Lax';
-}
-
-// Check if user already made a choice
-const existingConsent = getCookie('radio_consent');
-if (existingConsent !== null) {
-  cookiesAllowed = existingConsent === '1';
-} else {
-  // Show consent banner
-  const banner = document.getElementById('cookieBanner');
-  banner.classList.remove('hidden');
-
-  document.getElementById('cookieTitle').textContent = t('cookieTitle');
-  document.getElementById('cookieDesc').textContent = t('cookieDesc');
-  document.getElementById('cookieHighlight').textContent = t('cookieHighlight');
-  document.getElementById('cookieAccept').textContent = t('cookieAccept');
-  document.getElementById('cookieDecline').textContent = t('cookieDecline');
-
-  document.getElementById('cookieAccept').addEventListener('click', () => {
-    cookiesAllowed = true;
-    setCookie('radio_consent', '1', 365);
-    banner.classList.add('hidden');
-    saveVolume(); // Save current volume now that consent is given
-  });
-
-  document.getElementById('cookieDecline').addEventListener('click', () => {
-    cookiesAllowed = false;
-    setCookie('radio_consent', '0', 365);
-    banner.classList.add('hidden');
-  });
-}
-
-// ─── Volume ──────────────────────────────────────────────────
+// ─── Volume (localStorage) ───────────────────────────────────
 const audioEl    = document.getElementById('audio');
 const trackEl    = document.getElementById('track');
 const playBtn    = document.getElementById('playBtn');
@@ -577,24 +430,20 @@ const volDisplay = document.getElementById('volDisplay');
 const badge      = document.getElementById('badge');
 const statsEl    = document.getElementById('stats');
 
-let isPlaying = false;
-let volume = 70;
+const VOLUME_KEY = 'radio_volume';
+const DEFAULT_VOLUME = 70;
 
-function saveVolume() {
-  if (cookiesAllowed) {
-    setCookie('radio_volume', volume, 365);
-  }
+function saveVolume(v) {
+  localStorage.setItem(VOLUME_KEY, String(v));
 }
 
 function loadVolume() {
-  if (cookiesAllowed) {
-    const saved = getCookie('radio_volume');
-    if (saved !== null) {
-      const v = parseInt(saved, 10);
-      if (!isNaN(v) && v >= 0 && v <= 100) return v;
-    }
+  const raw = localStorage.getItem(VOLUME_KEY);
+  if (raw !== null) {
+    const v = parseInt(raw, 10);
+    if (!isNaN(v) && v >= 0 && v <= 100) return v;
   }
-  return 70; // Default
+  return DEFAULT_VOLUME;
 }
 
 function updateVolUI() {
@@ -602,7 +451,6 @@ function updateVolUI() {
   volFill.style.width = volume + '%';
   volThumb.style.left = volume + '%';
 
-  // Update icon based on volume
   if (volume === 0) volIcon.textContent = '🔇';
   else if (volume < 30) volIcon.textContent = '🔈';
   else if (volume < 70) volIcon.textContent = '🔉';
@@ -614,10 +462,9 @@ function updateVolUI() {
 function setVol(v) {
   volume = Math.max(0, Math.min(100, v));
   updateVolUI();
-  saveVolume();
+  saveVolume(volume);
 }
 
-// Slider interaction
 let isDragging = false;
 
 function getSliderVolume(e) {
@@ -647,11 +494,12 @@ document.addEventListener('touchmove', (e) => {
 document.addEventListener('mouseup', () => { isDragging = false; });
 document.addEventListener('touchend', () => { isDragging = false; });
 
-// Load saved volume
-volume = loadVolume();
+let volume = loadVolume();
 updateVolUI();
 
 // ─── Play / Pause ────────────────────────────────────────────
+let isPlaying = false;
+
 playBtn.addEventListener('click', () => {
   if (isPlaying) {
     audioEl.pause();
@@ -689,9 +537,7 @@ const es = new EventSource('/title-stream');
 es.onmessage = (e) => {
   try {
     const data = JSON.parse(e.data);
-    // Update title
     trackEl.textContent = data.title;
-    // Update queue in real-time if panel is open
     if (playlistData) {
       playlistData.current = data.title;
       playlistData.queue = data.queue;
@@ -702,7 +548,6 @@ es.onmessage = (e) => {
       renderQueue();
     }
   } catch {
-    // Fallback: если вдруг пришёл не-JSON
     trackEl.textContent = e.data;
   }
 };
@@ -713,8 +558,7 @@ async function updateStats() {
   try {
     const r = await fetch('/status');
     const d = await r.json();
-    const listenersLabel = t('listeners');
-    statsEl.textContent = `${listenersLabel}: ${d.listeners} · ${d.bitrate} kbps`;
+    statsEl.textContent = `${t('listeners')}: ${d.listeners} · ${d.bitrate} kbps`;
   } catch {}
 }
 setInterval(updateStats, 10000);
@@ -761,7 +605,6 @@ playlistBtn.addEventListener('click', openPlaylist);
 closePlaylist.addEventListener('click', closePlaylistPanel);
 overlayEl.addEventListener('click', closePlaylistPanel);
 
-// Tab switching
 tabBtns.forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
@@ -773,7 +616,7 @@ tabBtns.forEach(btn => {
 });
 
 async function loadPlaylist() {
-  if (playlistData) return; // Already loaded
+  if (playlistData) return;
 
   try {
     const r = await fetch('/playlist');
@@ -786,7 +629,7 @@ async function loadPlaylist() {
     renderSongsList(filteredSongs);
     renderCurrentSong();
     renderQueue();
-  } catch (e) {
+  } catch {
     const err = t('loadError');
     songsList.innerHTML = `<div class="loading">${err}</div>`;
     currentSongEl.innerHTML = `<div class="loading">${err}</div>`;
@@ -799,23 +642,20 @@ function renderSongsList(songs) {
     songsList.innerHTML = `<div class="loading">${t('noSongs')}</div>`;
     return;
   }
-
   songsList.innerHTML = songs.map((song, i) => {
     const isCurrent = song.title === playlistData.current;
     return `
       <div class="song-item ${isCurrent ? 'current' : ''}">
         <div class="song-number">#${i + 1}</div>
         <div class="song-title">${song.title}</div>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
 function renderCurrentSong() {
   currentSongEl.innerHTML = `
     <div class="playing-icon">🎵</div>
-    <h3>${playlistData.current}</h3>
-  `;
+    <h3>${playlistData.current}</h3>`;
 }
 
 function renderQueue() {
@@ -823,29 +663,22 @@ function renderQueue() {
     queueList.innerHTML = `<div class="loading">${t('queueEmpty')}</div>`;
     return;
   }
-
   queueList.innerHTML = playlistData.queue.map(item => {
     const isCurrent = item.position === 1;
-    const posLabel = isCurrent ? '▶' : `${item.position}`;
+    const posLabel = isCurrent ? '▶' : String(item.position);
     return `
       <div class="queue-item ${isCurrent ? 'current' : ''}">
         <span class="queue-pos">${posLabel}</span>
         <span class="queue-title">${item.title}</span>
-      </div>
-    `;
+      </div>`;
   }).join('');
 }
 
-// Search functionality
 searchInput.addEventListener('input', (e) => {
   const query = e.target.value.toLowerCase();
-  if (!query) {
-    filteredSongs = playlistData.all_songs;
-  } else {
-    filteredSongs = playlistData.all_songs.filter(song =>
-      song.title.toLowerCase().includes(query)
-    );
-  }
+  filteredSongs = query
+    ? playlistData.all_songs.filter(s => s.title.toLowerCase().includes(query))
+    : playlistData.all_songs;
   renderSongsList(filteredSongs);
 });
 </script>
