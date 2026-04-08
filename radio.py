@@ -1,5 +1,5 @@
 # radio.py
-# pip install flask mutagen
+# pip install flask mutagen flask-minify
 
 import os
 import re
@@ -11,6 +11,7 @@ import time
 import signal
 import sys
 from flask import Flask, Response, render_template, jsonify
+from flask_minify import Minify
 from mutagen.mp3 import MP3
 
 # ─── Настройки ────────────────────────────────────────────────
@@ -29,6 +30,7 @@ PREBUFFER_MAX_BYTES = 256_000  # ~10 сек при 192 kbps, ~16 сек при 1
 # ──────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
+Minify(app=app, html=True, js=True, cssless=True)
 
 current_song: dict    = {"title": "—", "bitrate": 128}
 clients: list         = []
