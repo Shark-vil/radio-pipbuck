@@ -684,9 +684,28 @@ function connectStream() {
   audioEl.play();
 }
 
-// ─── SSE — Track Title ──────────────────────────────────────
+// ─── SSE — Track Title + Queue (real-time) ──────────────────
 const es = new EventSource('/title-stream');
-es.onmessage = (e) => { trackEl.textContent = e.data; };
+es.onmessage = (e) => {
+  try {
+    const data = JSON.parse(e.data);
+    // Update title
+    trackEl.textContent = data.title;
+    // Update queue in real-time if panel is open
+    if (playlistData) {
+      playlistData.current = data.title;
+      playlistData.queue = data.queue;
+      playlistData.queue_position = data.queue_position;
+      playlistData.queue_total = data.queue_total;
+      queueCount.textContent = data.queue.length - 1;
+      renderCurrentSong();
+      renderQueue();
+    }
+  } catch {
+    // Fallback: если вдруг пришёл не-JSON
+    trackEl.textContent = e.data;
+  }
+};
 es.onerror = () => {};
 
 // ─── Stats ───────────────────────────────────────────────────

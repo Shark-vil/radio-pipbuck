@@ -48,14 +48,38 @@ _queue_gen_lock = threading.Lock()
 
 # ─── Утилиты ──────────────────────────────────────────────────
 
+import json as _json_module
+
+def get_current_queue() -> list[dict]:
+    """Возвращает список оставшихся треков в текущей очереди."""
+    with queue_lock:
+        current_idx = queue_index
+        queue_snapshot = list(play_queue)
+
+    upcoming = []
+    for i, (filename, filepath, bitrate) in enumerate(queue_snapshot):
+        if i >= current_idx:
+            upcoming.append({
+                "title": clean_title(filename),
+                "position": i - current_idx + 1
+            })
+    return upcoming
+
+
 def notify_title_change() -> None:
-    """SSE-уведомление о смене трека (вызывать без лока)."""
-    title_data = f"data: {current_song['title']}\n\n"
+    """SSE-уведомление о смене трека + обновлении очереди."""
+    payload = _json_module.dumps({
+        "title": current_song["title"],
+        "queue": get_current_queue(),
+        "queue_position": queue_index + 1,
+        "queue_total": len(play_queue)
+    })
+    sse_data = f"data: {payload}\n\n"
     dead: list = []
     with clients_lock:
         for q in title_listeners:
             try:
-                q.put_nowait(title_data)
+                q.put_nowait(sse_data)
             except queue.Full:
                 dead.append(q)
         for d in dead:
@@ -312,22 +336,27 @@ def title_page():
 
 @app.route('/title-stream')
 def title_stream():
-    """SSE — название трека в реальном времени (для JS на странице)."""
+    """SSE — название трека + очередь в реальном времени."""
     q: queue.Queue = queue.Queue(maxsize=16)
 
     with clients_lock:
         title_listeners.append(q)
 
     def generate():
-        # Текущий трек сразу при подключении
-        yield f"data: {current_song['title']}\n\n"
+        # Начальное состояние: текущий трек + очередь
+        initial_payload = _json_module.dumps({
+            "title": current_song["title"],
+            "queue": get_current_queue(),
+            "queue_position": queue_index + 1,
+            "queue_total": len(play_queue)
+        })
+        yield f"data: {initial_payload}\n\n"
         try:
             while not shutdown_event.is_set():
                 try:
                     data = q.get(timeout=1.0)
                     yield data
                 except queue.Empty:
-                    # Heartbeat — держим соединение живым через прокси
                     yield ": heartbeat\n\n"
         finally:
             with clients_lock:
@@ -367,19 +396,7 @@ def status():
 def playlist():
     """Возвращает текущий трек, очередь и полный список песен."""
     all_songs = get_song_cache()
-
-    # Формируем очередь: треки от текущего до конца
-    with queue_lock:
-        current_idx = queue_index
-        queue_snapshot = list(play_queue)
-
-    upcoming = []
-    for i, (filename, filepath, bitrate) in enumerate(queue_snapshot):
-        if i >= current_idx:
-            upcoming.append({
-                "title": clean_title(filename),
-                "position": i - current_idx + 1  # 1 = сейчас играет, 2 = следующий, и т.д.
-            })
+    upcoming = get_current_queue()
 
     return (
         {
@@ -387,8 +404,8 @@ def playlist():
             "queue": upcoming,
             "all_songs": all_songs,
             "total": len(all_songs),
-            "queue_position": current_idx + 1,
-            "queue_total": len(queue_snapshot)
+            "queue_position": queue_index + 1,
+            "queue_total": len(play_queue)
         },
         200,
         {
