@@ -456,7 +456,7 @@ function updateVolUI() {
   else if (volume < 70) volIcon.textContent = '🔉';
   else volIcon.textContent = '🔊';
 
-  audioEl.volume = volume / 100;
+  audioEl.volume = Math.pow(volume / 100, 2);
 }
 
 function setVol(v) {
