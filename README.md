@@ -7,11 +7,12 @@ Lightweight internet radio streaming server. Broadcasts MP3 files from a local d
 - **Continuous streaming** — granular chunk-based MP3 broadcasting with drift correction for accurate playback speed
 - **Multi-client support** — serves unlimited concurrent listeners with per-client queue buffers and automatic slow-client detection
 - **Smart queue management** — randomized shuffle playback; the next queue is pre-generated in the background before the current one ends, ensuring zero stream interruption
-- **Real-time metadata** — Server-Sent Events (SSE) push live track titles and queue updates to all connected clients
+- **Audio pre-buffer** — new listeners instantly receive the last ~10 seconds of audio, giving the browser enough data to buffer before playback starts and eliminating startup stutters
+- **Real-time metadata** — Server-Sent Events (SSE) push live track titles and queue updates to all connected clients with a configurable delay to stay in sync with actual audio playback
 - **Web player** — play/pause, volume slider with touch support, live status badge, listener count
 - **Playlist panel** — browse all songs with search, view the current playback queue, all without interrupting the stream
 - **Localization** — automatic language detection (Russian / English) for the entire UI
-- **Cookie consent** — full-screen banner on first visit; volume is saved in cookies only after explicit consent
+- **HTML/CSS/JS minification** — responses are automatically minified on the fly via flask-minify
 - **Minimal "Now Playing" page** — lightweight title display with AJAX polling for embeds or overlays
 - **Docker-ready** — one-command deployment with `docker compose`
 
@@ -24,10 +25,13 @@ Lightweight internet radio streaming server. Broadcasts MP3 files from a local d
 
 ### Environment Variables
 
-| Variable    | Default        | Description                     |
-|-------------|----------------|---------------------------------|
-| `MUSIC_DIR` | `D:\mlpStream` | Path to directory with MP3 files|
-| `PORT`      | `8000`         | HTTP server port                |
+Copy `.env.example` to `.env` and adjust as needed.
+
+| Variable               | Default        | Description                                                                 |
+|------------------------|----------------|-----------------------------------------------------------------------------|
+| `MUSIC_DIR`            | `D:\mlpStream` | Path to directory with MP3 files                                            |
+| `PORT`                 | `8000`         | HTTP server port                                                            |
+| `TITLE_DELAY_SECONDS`  | `5`            | SSE title update delay in seconds. Compensates for browser audio buffering. Set to `0` to disable. |
 
 ### Method 1 — Windows Launcher
 
@@ -45,13 +49,15 @@ python -m venv .venv
 # source .venv/bin/activate     # Linux/macOS
 pip install -r requirements.txt
 
-MUSIC_DIR=/path/to/music python radio.py
+cp .env.example .env            # configure as needed
+python radio.py
 ```
 
 ### Method 3 — Docker
 
 ```bash
 mkdir music                       # place your .mp3 files here
+cp .env.example .env              # configure as needed
 docker compose up -d
 ```
 
@@ -86,8 +92,8 @@ The server is available at `http://localhost:8000`.
   "current": "Currently Playing Track",
   "queue": [
     { "title": "Currently Playing Track", "position": 1 },
-    { "title": "Next Track",            "position": 2 },
-    { "title": "After That",            "position": 3 }
+    { "title": "Next Track",              "position": 2 },
+    { "title": "After That",              "position": 3 }
   ],
   "all_songs": [
     { "filename": "01 - Song.mp3", "title": "Song" },
@@ -123,6 +129,8 @@ Heartbeat messages (`: heartbeat\n\n`) are sent every second of inactivity to ke
 radio-pipbuck/
 ├── radio.py              # Flask app + broadcaster thread
 ├── requirements.txt      # Python dependencies
+├── .env                  # Local configuration (not committed)
+├── .env.example          # Configuration template
 ├── run.bat               # Windows launcher
 ├── Dockerfile
 ├── docker-compose.yml
@@ -134,22 +142,20 @@ radio-pipbuck/
 
 ## Configuration
 
-Hardcoded constants in `radio.py`:
+Tunable constants in `radio.py`:
 
-| Constant     | Value  | Description                                      |
-|--------------|--------|--------------------------------------------------|
-| `HOST`       | `0.0.0.0` | Bind address (all interfaces)                   |
-| `CHUNK`      | `4096` | Bytes per read chunk. At 128 kbps ≈ 0.25s intervals |
-| `QUEUE_SIZE` | `512`  | Max buffered chunks per client (~2 MB). Slow clients are dropped |
+| Constant              | Value     | Description                                                        |
+|-----------------------|-----------|--------------------------------------------------------------------|
+| `HOST`                | `0.0.0.0` | Bind address (all interfaces)                                      |
+| `CHUNK`               | `4096`    | Bytes per read chunk. At 128 kbps ≈ 0.25 s per chunk              |
+| `QUEUE_SIZE`          | `512`     | Max buffered chunks per client (~2 MB). Slow clients are dropped   |
+| `PREBUFFER_MAX_BYTES` | `256000`  | Audio pre-buffer size (~10 s at 192 kbps, ~16 s at 128 kbps)      |
 
-## Cookies
+## localStorage
 
-| Cookie            | Purpose                          | Lifetime |
-|-------------------|----------------------------------|----------|
-| `radio_volume`    | Volume preference (0–100)        | 365 days |
-| `radio_consent`   | Consent choice (`0` or `1`)      | 365 days |
-
-Volume is only stored if the user accepts the cookie consent banner.
+| Key             | Purpose                   |
+|-----------------|---------------------------|
+| `radio_volume`  | Volume preference (0–100) |
 
 ## License
 
