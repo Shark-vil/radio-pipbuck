@@ -2,15 +2,21 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>MLP Radio</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    overflow-x: hidden;
+    max-width: 100%;
+    overscroll-behavior-x: none;
+  }
   body {
     min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
     font-family: 'Segoe UI', sans-serif; color: #fff;
+    touch-action: pan-y;
   }
   .player {
     background: rgba(255,255,255,0.08);
@@ -55,6 +61,7 @@
     background: rgba(255,255,255,0.15);
     position: relative;
     cursor: pointer;
+    touch-action: none;
   }
   .vol-slider-fill {
     height: 100%;
