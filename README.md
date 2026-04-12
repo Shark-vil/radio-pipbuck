@@ -76,6 +76,7 @@ The server is available at `http://localhost:8000`.
 | GET    | `/status`       | Server status                          | `application/json`  |
 | GET    | `/playlist`     | Full playlist and current queue        | `application/json`  |
 | GET    | `/obs`          | OBS Browser Source (transparent audio) | `text/html`         |
+| GET    | `/pages`        | All pages with descriptions            | `text/html`         |
 
 ### `/status`
 
@@ -140,7 +141,8 @@ radio-pipbuck/
 └── templates/
     ├── index.html        # Main player (full UI)
     ├── title.html        # Minimal "Now Playing" page
-    └── obs.html          # OBS Browser Source — transparent, audio-only
+    ├── obs.html          # OBS Browser Source — transparent, audio-only
+    └── pages.html        # All pages with descriptions (bilingual)
 ```
 
 ## Configuration

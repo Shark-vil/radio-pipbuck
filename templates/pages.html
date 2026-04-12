@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="pageTitle">Страницы</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+    font-family: 'Segoe UI', sans-serif; color: #fff;
+    padding: 24px;
+  }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .card-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card-icon { font-size: 28px; }
+  h1 { font-size: 20px; }
+  .page-list {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .page-item {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.05);
+    text-decoration: none;
+    transition: background 0.2s;
+  }
+  .page-item:hover { background: rgba(255,255,255,0.12); }
+  .page-path {
+    font-size: 13px;
+    font-family: monospace;
+    color: #64ffda;
+  }
+  .page-desc {
+    font-size: 14px;
+    color: #a8b2d1;
+    line-height: 1.4;
+  }
+  .back-link {
+    display: inline-block;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #556;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: #a8b2d1; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <span class="card-icon">📡</span>
+    <h1 id="heading">Страницы</h1>
+  </div>
+  <div class="page-list" id="pageList"></div>
+  <a href="/" class="back-link" id="backLink">← Назад</a>
+</div>
+
+<script>
+function detectLanguage() {
+  const nav = navigator.language || navigator.userLanguage || '';
+  return nav.toLowerCase().startsWith('ru') ? 'ru' : 'en';
+}
+
+const LANG = detectLanguage();
+document.documentElement.lang = LANG;
+
+const i18n = {
+  ru: {
+    pageTitle: 'Страницы — MLP Radio',
+    heading: 'Страницы',
+    back: '← На главную',
+    pages: [
+      { path: '/',           desc: 'Главный плеер — воспроизведение, регулировка громкости, список треков и текущая очередь.' },
+      { path: '/title-page', desc: 'Минималистичная страница с названием текущего трека. Удобна для оверлеев в стриминге.' },
+      { path: '/obs',        desc: 'Источник для OBS Browser Source — прозрачный фон, только аудио, встроенный watchdog для непрерывного захвата.' },
+      { path: '/status',     desc: 'JSON-статус сервера: текущий трек, битрейт, количество слушателей.' },
+      { path: '/playlist',   desc: 'JSON-данные: текущий трек, очередь воспроизведения и полный список песен.' },
+      { path: '/stream',     desc: 'Прямой аудиопоток MP3 — можно открыть в любом медиаплеере по этому адресу.' },
+    ]
+  },
+  en: {
+    pageTitle: 'Pages — MLP Radio',
+    heading: 'Pages',
+    back: '← Back to player',
+    pages: [
+      { path: '/',           desc: 'Main player — playback controls, volume slider, song list, and current queue.' },
+      { path: '/title-page', desc: 'Minimal now-playing display showing only the current track title. Handy for streaming overlays.' },
+      { path: '/obs',        desc: 'OBS Browser Source page — transparent background, audio only, built-in watchdog for uninterrupted capture.' },
+      { path: '/status',     desc: 'JSON server status: current track, bitrate, and listener count.' },
+      { path: '/playlist',   desc: 'JSON data: current track, playback queue, and full song list.' },
+      { path: '/stream',     desc: 'Raw MP3 audio stream — open this URL in any media player to tune in.' },
+    ]
+  }
+};
+
+const loc = i18n[LANG] || i18n.en;
+document.getElementById('pageTitle').textContent = loc.pageTitle;
+document.getElementById('heading').textContent = loc.heading;
+document.getElementById('backLink').textContent = loc.back;
+
+const list = document.getElementById('pageList');
+loc.pages.forEach(p => {
+  const a = document.createElement('a');
+  a.className = 'page-item';
+  a.href = p.path;
+  a.innerHTML = `<span class="page-path">${p.path}</span><span class="page-desc">${p.desc}</span>`;
+  list.appendChild(a);
+});
+</script>
+</body>
+</html>

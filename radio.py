@@ -380,6 +380,12 @@ def obs():
     return render_template('obs.html')
 
 
+@app.route('/pages')
+def pages():
+    """Описание всех доступных страниц сервера."""
+    return render_template('pages.html')
+
+
 @app.route('/title-stream')
 def title_stream():
     """SSE — название трека + очередь в реальном времени."""

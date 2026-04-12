@@ -91,6 +91,20 @@
   .status-badge.offline { background: rgba(255,255,255,0.1); color: #888; }
 
   .stats { font-size: 12px; color: #556; }
+  .info-link {
+    display: inline-block;
+    margin-top: 10px;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    color: #556;
+    font-size: 13px;
+    line-height: 24px;
+    text-align: center;
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+  }
+  .info-link:hover { background: rgba(255,255,255,0.18); color: #a8b2d1; }
 
   /* Playlist Panel */
   .playlist-panel {
@@ -325,6 +339,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
+  <a href="/pages" class="info-link" id="pagesLink" title="Pages">ℹ</a>
 </div>
 
 <!-- Скрытый аудио — НИКАКОГО UI -->
@@ -392,7 +407,8 @@ const i18n = {
     allSongs: 'Все песни',
     nowPlaying: 'Сейчас играет',
     queueTitle: 'Очередь воспроизведения',
-    page_title: 'MLP Radio'
+    page_title: 'MLP Radio',
+    pagesLink: 'Список страниц'
   },
   en: {
     loading: 'Loading...',
@@ -407,7 +423,8 @@ const i18n = {
     allSongs: 'All Songs',
     nowPlaying: 'Now Playing',
     queueTitle: 'Playback Queue',
-    page_title: 'MLP Radio'
+    page_title: 'MLP Radio',
+    pagesLink: 'Pages'
   }
 };
 
@@ -586,6 +603,7 @@ document.getElementById('queueTitle').childNodes[0].textContent = t('queueTitle'
 document.getElementById('searchInput').placeholder = t('searchPlaceholder');
 document.getElementById('playBtn').title = t('playPause');
 document.getElementById('playlistBtn').title = t('playlistBtn');
+document.getElementById('pagesLink').title = t('pagesLink');
 
 let playlistData = null;
 let filteredSongs = [];
