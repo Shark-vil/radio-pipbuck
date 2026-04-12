@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; }
+  html, body {
+    background: transparent;
+    width: 0; height: 0;
+    overflow: hidden;
+  }
+</style>
+</head>
+<body>
+<audio id="a" preload="none" style="position:absolute;width:0;height:0;pointer-events:none;"></audio>
+<script>
+(function () {
+  'use strict';
+
+  var audio        = document.getElementById('a');
+  var STREAM_URL   = '/stream';
+  var RECONNECT_MS = 2000;   // базовая задержка перед переподключением
+  var STALL_MS     = 8000;   // секунд без движения currentTime → принудительный рестарт
+  var CHECK_MS     = 1000;   // период watchdog-тика
+
+  var lastTime     = -1;
+  var lastTimeAt   = 0;
+  var reconnecting = false;
+  var watchdogTimer = null;
+  var reconnectTimer = null;
+
+  function log(msg) {
+    // оставляем console для отладки в OBS → Ctrl+Alt+B → DevTools
+    console.log('[obs-stream] ' + msg);
+  }
+
+  function cacheBust() {
+    return STREAM_URL + '?t=' + Date.now();
+  }
+
+  function clearTimers() {
+    if (watchdogTimer)   { clearInterval(watchdogTimer);  watchdogTimer  = null; }
+    if (reconnectTimer)  { clearTimeout(reconnectTimer);  reconnectTimer = null; }
+  }
+
+  function connect(delay) {
+    if (reconnecting) return;
+    reconnecting = true;
+    clearTimers();
+
+    reconnectTimer = setTimeout(function () {
+      reconnecting = false;
+      log('подключение к стриму...');
+
+      // Полный сброс элемента
+      audio.pause();
+      audio.src = '';
+      audio.load();
+
+      audio.volume = 1.0;
+      audio.src    = cacheBust();
+
+      var p = audio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(function () {
+          log('воспроизведение началось');
+        }).catch(function (err) {
+          log('play() отклонён: ' + err + ' — повтор через ' + RECONNECT_MS + 'ms');
+          scheduleReconnect(RECONNECT_MS);
+        });
+      }
+
+      lastTime   = -1;
+      lastTimeAt = Date.now();
+      startWatchdog();
+    }, delay || 0);
+  }
+
+  function scheduleReconnect(delay) {
+    if (reconnecting) return;
+    log('переподключение через ' + delay + 'ms');
+    connect(delay);
+  }
+
+  // ── Watchdog: следит за тем, чтобы currentTime двигался ─────
+  function startWatchdog() {
+    clearInterval(watchdogTimer);
+    watchdogTimer = setInterval(function () {
+      if (audio.paused || audio.ended) {
+        log('watchdog: аудио на паузе/завершено');
+        scheduleReconnect(RECONNECT_MS);
+        return;
+      }
+
+      var ct = audio.currentTime;
+      if (ct !== lastTime) {
+        // прогресс есть
+        lastTime   = ct;
+        lastTimeAt = Date.now();
+      } else {
+        // currentTime не двигается
+        var stale = Date.now() - lastTimeAt;
+        if (stale >= STALL_MS) {
+          log('watchdog: зависание ' + Math.round(stale / 1000) + 'с → рестарт');
+          scheduleReconnect(RECONNECT_MS);
+        }
+      }
+    }, CHECK_MS);
+  }
+
+  // ── Обработчики событий аудио ────────────────────────────────
+  audio.addEventListener('error', function () {
+    var code = audio.error ? audio.error.code : '?';
+    log('ошибка аудио (code=' + code + ') → рестарт');
+    scheduleReconnect(RECONNECT_MS);
+  });
+
+  audio.addEventListener('ended', function () {
+    log('поток завершился → рестарт');
+    scheduleReconnect(500);
+  });
+
+  audio.addEventListener('stalled', function () {
+    log('stalled → сброс watchdog-таймера');
+    // Не рестартуем сразу — watchdog сработает через STALL_MS
+    lastTimeAt = Date.now() - STALL_MS + 3000; // даём 3 доп.секунды
+  });
+
+  audio.addEventListener('waiting', function () {
+    log('waiting (буферизация)');
+    lastTimeAt = Date.now() - STALL_MS + 4000;
+  });
+
+  audio.addEventListener('playing', function () {
+    log('playing');
+    lastTime   = audio.currentTime;
+    lastTimeAt = Date.now();
+  });
+
+  // ── SSE: если сервер жив и присылает треки, но аудио молчит — рестарт ──
+  (function connectSSE() {
+    try {
+      var es = new EventSource('/title-stream');
+      es.onmessage = function () {
+        // Сервер живой. Если мы при этом не играем — принудительно рестартуем
+        if (audio.paused || audio.ended || audio.readyState < 2) {
+          log('SSE: сервер жив, но аудио не играет → рестарт');
+          scheduleReconnect(500);
+        }
+      };
+      es.onerror = function () {
+        // SSE упал — не паникуем, watchdog сам разберётся
+        setTimeout(function () {
+          es.close();
+          connectSSE();
+        }, 5000);
+      };
+    } catch (e) {
+      setTimeout(connectSSE, 5000);
+    }
+  })();
+
+  // ── Старт ────────────────────────────────────────────────────
+  // OBS открывает страницу без жеста пользователя → autoplay policy
+  // Audio в OBS Browser Source разрешён, но на всякий случай
+  // слушаем первый клик по документу как фолбэк.
+  document.addEventListener('click', function onFirstClick() {
+    document.removeEventListener('click', onFirstClick);
+    if (audio.paused) connect(0);
+  }, { once: true });
+
+  connect(0);
+})();
+</script>
+</body>
+</html>

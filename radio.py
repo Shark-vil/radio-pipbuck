@@ -374,6 +374,12 @@ def title_page():
     return render_template('title.html')
 
 
+@app.route('/obs')
+def obs():
+    """Прозрачная страница для OBS Browser Source — только аудио, без UI."""
+    return render_template('obs.html')
+
+
 @app.route('/title-stream')
 def title_stream():
     """SSE — название трека + очередь в реальном времени."""
@@ -474,6 +480,7 @@ if __name__ == '__main__':
     print(f"  Стрим:         http://localhost:{PORT}/stream")
     print(f"  Трек (текст):  http://localhost:{PORT}/title")
     print(f"  Трек (страница): http://localhost:{PORT}/title-page")
+    print(f"  OBS Source:      http://localhost:{PORT}/obs")
     print(f"  Трек (SSE):    http://localhost:{PORT}/title-stream")
     print(f"  Статус:        http://localhost:{PORT}/status\n")
 

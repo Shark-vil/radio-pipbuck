@@ -14,6 +14,7 @@ Lightweight internet radio streaming server. Broadcasts MP3 files from a local d
 - **Localization** — automatic language detection (Russian / English) for the entire UI
 - **HTML/CSS/JS minification** — responses are automatically minified on the fly via flask-minify
 - **Minimal "Now Playing" page** — lightweight title display with AJAX polling for embeds or overlays
+- **OBS Browser Source page** — transparent, UI-free audio player at full volume with multi-layer watchdog logic for uninterrupted stream capture
 - **Docker-ready** — one-command deployment with `docker compose`
 
 ## Quick Start
@@ -74,6 +75,7 @@ The server is available at `http://localhost:8000`.
 | GET    | `/title-stream` | SSE: title + queue updates             | `text/event-stream` |
 | GET    | `/status`       | Server status                          | `application/json`  |
 | GET    | `/playlist`     | Full playlist and current queue        | `application/json`  |
+| GET    | `/obs`          | OBS Browser Source (transparent audio) | `text/html`         |
 
 ### `/status`
 
@@ -137,7 +139,8 @@ radio-pipbuck/
 ├── README.md
 └── templates/
     ├── index.html        # Main player (full UI)
-    └── title.html        # Minimal "Now Playing" page
+    ├── title.html        # Minimal "Now Playing" page
+    └── obs.html          # OBS Browser Source — transparent, audio-only
 ```
 
 ## Configuration
@@ -156,6 +159,27 @@ Tunable constants in `radio.py`:
 | Key             | Purpose                   |
 |-----------------|---------------------------|
 | `radio_volume`  | Volume preference (0–100) |
+
+## OBS Browser Source Setup
+
+Use `/obs` to capture the radio audio inside OBS without any visible UI.
+
+1. In OBS, add a **Browser Source**
+2. Set URL to `http://localhost:8000/obs`
+3. Width / Height can be as small as `1 × 1`
+4. Make sure **"Shutdown source when not visible"** is **disabled**
+
+The page is fully transparent and renders nothing. JavaScript maintains the stream with several independent recovery layers:
+
+| Trigger | Action |
+|---|---|
+| `audio.error` | Reconnect after 2 s |
+| `audio.ended` | Reconnect after 0.5 s |
+| `currentTime` frozen for 8 s | Force reconnect |
+| `play()` rejected | Retry after 2 s |
+| SSE alive but audio silent | Reconnect after 0.5 s |
+
+Each reconnect uses a cache-busted URL (`/stream?t=<timestamp>`) to bypass any browser or proxy cache.
 
 ## License
 
