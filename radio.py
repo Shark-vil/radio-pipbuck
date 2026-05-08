@@ -30,6 +30,17 @@ QUEUE_SIZE = 512   # ~2 MB буфер на клиента — достаточн
 # Пребуфер для новых клиентов: ~10 сек аудио при 192 kbps
 # Новый клиент сразу получает этот буфер и избавляется от статтеров при старте
 PREBUFFER_MAX_BYTES = 256_000  # ~10 сек при 192 kbps, ~16 сек при 128 kbps
+
+# Заготовленные тихие MPEG1-Layer3-фреймы для заполнения переходов между треками.
+# Каждый фрейм: 4-байтный заголовок (sync + MPEG1 + Layer3 + bitrate + 44100 Hz, stereo)
+# + нули в качестве аудиоданных (part2_3_length=0 → нет сэмплов → настоящая тишина).
+def _make_silent_frame(bitrate_kbps: int) -> bytes:
+    idx = {32:1,40:2,48:3,56:4,64:5,80:6,96:7,112:8,128:9,160:10,192:11,224:12,256:13,320:14}.get(bitrate_kbps, 9)
+    frame_size = (144 * bitrate_kbps * 1000) // 44100
+    return b'\xff\xfb' + bytes([idx << 4, 0x00]) + b'\x00' * (frame_size - 4)
+
+_SILENT_FRAMES: dict = {br: _make_silent_frame(br) for br in [32,40,48,56,64,80,96,112,128,160,192,224,256,320]}
+
 # ──────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -157,6 +168,28 @@ def build_prepared_queue() -> list:
     return prepared
 
 
+def _broadcast_silence(bitrate_kbps: int, count: int) -> None:
+    """Рассылает `count` тихих MPEG-фреймов всем клиентам и в пребуфер.
+    Вызывается только из broadcaster-потока, чтобы заполнить паузу между треками."""
+    global _audio_prebuffer_size
+    frame = _SILENT_FRAMES.get(bitrate_kbps, _SILENT_FRAMES[128])
+    with clients_lock:
+        snapshot = list(clients)
+    for _ in range(count):
+        for q in snapshot:
+            try:
+                q.put_nowait(frame)
+            except queue.Full:
+                pass
+    with _audio_prebuffer_lock:
+        for _ in range(count):
+            _audio_prebuffer.append(frame)
+            _audio_prebuffer_size += len(frame)
+        while _audio_prebuffer_size > PREBUFFER_MAX_BYTES:
+            removed = _audio_prebuffer.popleft()
+            _audio_prebuffer_size -= len(removed)
+
+
 # ─── Broadcaster ──────────────────────────────────────────────
 
 def broadcaster() -> None:
@@ -208,7 +241,6 @@ def broadcaster() -> None:
                     while not shutdown_event.is_set():
                         chunk = f.read(CHUNK)
                         if not chunk:
-                            shutdown_event.wait(0.01)
                             break
 
                         with clients_lock:
@@ -247,11 +279,23 @@ def broadcaster() -> None:
             except Exception as e:
                 print(f"[radio] Ошибка при чтении {filename}: {e}")
 
+            # Инжектируем тишину в очереди клиентов сразу после конца трека.
+            # Это гарантирует, что HTTP-поток не прерывается пока broadcaster открывает
+            # следующий файл. 8 фреймов ≈ 208 мс — достаточно для любых задержек ФС.
+            if not shutdown_event.is_set():
+                try:
+                    next_br = play_queue[queue_index + 1][2] // 1000
+                except IndexError:
+                    next_br = bitrate // 1000
+                _broadcast_silence(next_br, 8)
+
         # Очередь закончилась — ждём, пока следующая будет готова
         if not shutdown_event.is_set():
             print("[radio] Очередь закончилась, жду следующую...")
             while not shutdown_event.is_set() and not next_queue_ready.is_set():
-                shutdown_event.wait(0.5)
+                # Гоним тишину с реальным темпом, чтобы клиенты не потеряли поток
+                _broadcast_silence(current_song['bitrate'], 10)
+                shutdown_event.wait(10 * 1152 / 44100)  # ~261 мс = длительность 10 фреймов
 
             if shutdown_event.is_set():
                 break
