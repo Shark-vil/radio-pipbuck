@@ -40,6 +40,8 @@
   </div>
 
   <script>
+    const STATION_ID = {{ station_id | tojson }};
+
     // ─── Localization ────────────────────────────────────────
     function detectLanguage() {
       const nav = navigator.language || navigator.userLanguage || '';
@@ -69,7 +71,7 @@
 
     async function update() {
       try {
-        const res = await fetch('/title');
+        const res = await fetch(`/${STATION_ID}/title`);
         const text = await res.text();
         if (text && el.textContent !== text) {
           el.style.opacity = '0';

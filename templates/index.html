@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>MLP Radio</title>
+<title>{{ station_name }}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -327,7 +327,7 @@
 
 <div class="player">
   <div class="icon">📻</div>
-  <h1>MLP Radio</h1>
+  <h1 id="stationName">{{ station_name }}</h1>
   <div class="status-badge offline" id="badge">OFFLINE</div>
   <div id="track">Загрузка...</div>
 
@@ -346,6 +346,7 @@
   </div>
 
   <div class="stats" id="stats"></div>
+  <a href="/" class="info-link" id="stationsLink" title="Stations">📻</a>
   <a href="/pages" class="info-link" id="pagesLink" title="Pages">ℹ</a>
 </div>
 
@@ -389,6 +390,10 @@
 <div id="overlay" class="overlay"></div>
 
 <script>
+// ─── Station ─────────────────────────────────────────────────
+const STATION_ID   = {{ station_id | tojson }};
+const STATION_NAME = {{ station_name | tojson }};
+
 // ─── Localization ────────────────────────────────────────────
 const LANG_RU = 'ru';
 const LANG_EN = 'en';
@@ -415,7 +420,8 @@ const i18n = {
     nowPlaying: 'Сейчас играет',
     queueTitle: 'Очередь воспроизведения',
     page_title: 'MLP Radio',
-    pagesLink: 'Список страниц'
+    pagesLink: 'Список страниц',
+    stationsLink: 'Выбор станции'
   },
   en: {
     loading: 'Loading...',
@@ -431,7 +437,8 @@ const i18n = {
     nowPlaying: 'Now Playing',
     queueTitle: 'Playback Queue',
     page_title: 'MLP Radio',
-    pagesLink: 'Pages'
+    pagesLink: 'Pages',
+    stationsLink: 'Choose station'
   }
 };
 
@@ -440,7 +447,7 @@ function t(key) {
 }
 
 document.documentElement.lang = LANG;
-document.title = t('page_title');
+document.title = STATION_NAME;
 
 // ─── Volume (localStorage) ───────────────────────────────────
 const audioEl    = document.getElementById('audio');
@@ -539,7 +546,7 @@ playBtn.addEventListener('click', () => {
 });
 
 function connectStream() {
-  audioEl.src = '/stream';
+  audioEl.src = `/${STATION_ID}/stream`;
   audioEl.onplaying = () => {
     isPlaying = true;
     playBtn.textContent = '⏸';
@@ -557,7 +564,7 @@ function connectStream() {
 }
 
 // ─── SSE — Track Title + Queue (real-time) ──────────────────
-const es = new EventSource('/title-stream');
+const es = new EventSource(`/${STATION_ID}/title-stream`);
 es.onmessage = (e) => {
   try {
     const data = JSON.parse(e.data);
@@ -580,7 +587,7 @@ es.onerror = () => {};
 // ─── Stats ───────────────────────────────────────────────────
 async function updateStats() {
   try {
-    const r = await fetch('/status');
+    const r = await fetch(`/${STATION_ID}/status`);
     const d = await r.json();
     statsEl.textContent = `${t('listeners')}: ${d.listeners} · ${d.bitrate} kbps`;
   } catch {}
@@ -611,6 +618,7 @@ document.getElementById('searchInput').placeholder = t('searchPlaceholder');
 document.getElementById('playBtn').title = t('playPause');
 document.getElementById('playlistBtn').title = t('playlistBtn');
 document.getElementById('pagesLink').title = t('pagesLink');
+document.getElementById('stationsLink').title = t('stationsLink');
 
 let playlistData = null;
 let filteredSongs = [];
@@ -644,7 +652,7 @@ async function loadPlaylist() {
   if (playlistData) return;
 
   try {
-    const r = await fetch('/playlist');
+    const r = await fetch(`/${STATION_ID}/playlist`);
     playlistData = await r.json();
 
     totalCount.textContent = playlistData.total;
