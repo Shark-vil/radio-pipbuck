@@ -92,6 +92,8 @@ Drop a `.json` file into the `stations/` directory (configurable via `STATIONS_D
 | `music_dir`  | No       | Directory the listed (or scanned) MP3 files live in. Defaults to `MUSIC_DIR`.                  |
 | `files`      | No       | Explicit list of filenames (relative to `music_dir`) to shuffle and play. If omitted, every `.mp3` file in `music_dir` is used — same as the general station. |
 
+A file listed in `files` that doesn't actually exist in `music_dir` is skipped (logged as a warning) instead of crashing the station — the rest of the list still plays.
+
 JSON was chosen over `.txt` / `.yml` / `.cfg` because it needs no extra dependency, parses unambiguously, and the format above is already the simplest shape that expresses "name + list of files".
 
 A minimal config that just points at a folder (no explicit track list) also works:
@@ -99,6 +101,14 @@ A minimal config that just points at a folder (no explicit track list) also work
 ```json
 { "name": "Lo-fi Beats", "music_dir": "D:\\Music\\lofi" }
 ```
+
+Inside Docker, `music_dir` must be a Unix-style path pointing inside the container, not a Windows host path — see [Method 3 — Docker](#method-3--docker):
+
+```json
+{ "name": "Lo-fi Beats", "music_dir": "/music/lofi" }
+```
+
+If you omit `music_dir` and `files` entirely (`{ "name": "MLP FM" }`), the station falls back to `MUSIC_DIR` and scans every `.mp3` in it — i.e. it becomes a full clone of the general station's playlist, just under its own name, URL, and independent shuffle/listener stream.
 
 Station ids must be alphanumeric (`-`/`_` allowed) and can't collide with reserved routes (`pages`, `stream`, `title`, `status`, `playlist`, `obs`, `static`, `api`, `general`).
 
