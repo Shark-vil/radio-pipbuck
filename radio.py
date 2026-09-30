@@ -31,6 +31,9 @@ DEFAULT_STATION_NAME = os.environ.get("STATION_NAME", "MLP Radio")
 # Кастомные станции описываются JSON-файлами в этой папке (см. README)
 STATIONS_DIR = os.environ.get("STATIONS_DIR", "stations")
 
+# Как часто проверять папки с музыкой и STATIONS_DIR на изменения (0 = не следить)
+RELOAD_INTERVAL = float(os.environ.get("RELOAD_INTERVAL_SECONDS", "5"))
+
 # Идентификаторы, которые нельзя использовать как id станции — конфликтуют с системными роутами
 RESERVED_STATION_IDS = {
     "pages", "stream", "title", "title-page", "title-stream",
@@ -93,24 +96,58 @@ class Station:
         self.play_queue: list = []
         self.queue_lock = threading.Lock()
         self.queue_index = 0
+
+        # Следующая очередь готовится заранее и подменяет текущую только когда та закончится.
+        # next_queue_version — версия библиотеки, из которой она собрана: если файлы успели
+        # поменяться, очередь считается устаревшей и пересобирается.
+        self.next_queue: list = []
+        self.next_queue_version = -1
         self.next_queue_ready = threading.Event()
+        self.library_version = 0
 
         self._queue_generation_in_progress = False
         self._queue_gen_lock = threading.Lock()
+
+        # Последний набор файлов папки {имя: (размер, mtime)}, применённый LibraryWatcher'ом.
+        # None — ещё не применялся (или сменился music_dir/files и нужно применить заново).
+        self._library: dict | None = None
+
+        self.stop_event = threading.Event()
 
         self._audio_prebuffer: collections.deque = collections.deque()
         self._audio_prebuffer_size = 0
         self._audio_prebuffer_lock = threading.Lock()
 
-    def refresh_song_cache(self) -> list[dict]:
-        """Сканирует music_dir (или фильтрует по явному списку файлов) и кэширует результат."""
-        try:
-            available = set(os.listdir(self.music_dir))
-        except FileNotFoundError:
-            print(f"[radio:{self.id}] Папка не найдена: {self.music_dir}")
-            with self.song_cache_lock:
-                self.song_cache.clear()
-            return []
+    def _stopping(self) -> bool:
+        return shutdown_event.is_set() or self.stop_event.is_set()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
+    def reconfigure(self, name: str, music_dir: str, files: list[str] | None) -> None:
+        """Применяет изменённый JSON-конфиг станции, не останавливая эфир."""
+        if name != self.name:
+            print(f"[radio:{self.id}] Станция переименована: «{self.name}» → «{name}»")
+            self.name = name
+        if music_dir != self.music_dir or files != self.explicit_files:
+            print(f"[radio:{self.id}] Плейлист станции изменён, обновляю очередь")
+            self.music_dir = music_dir
+            self.explicit_files = files
+            self._library = None  # LibraryWatcher применит новый набор файлов в этом же проходе
+
+    def refresh_song_cache(self, available: set[str] | None = None) -> list[dict]:
+        """Сканирует music_dir (или фильтрует по явному списку файлов) и кэширует результат.
+        available — уже известный набор файлов папки (от LibraryWatcher), чтобы не сканировать заново."""
+        if available is None and self._library is not None:
+            available = set(self._library)
+        if available is None:
+            try:
+                available = set(os.listdir(self.music_dir))
+            except FileNotFoundError:
+                print(f"[radio:{self.id}] Папка не найдена: {self.music_dir}")
+                with self.song_cache_lock:
+                    self.song_cache.clear()
+                return []
 
         if self.explicit_files is not None:
             files = []
@@ -146,7 +183,10 @@ class Station:
 
         filenames = [s["filename"] for s in cached]
         random.shuffle(filenames)
+        return self._prepare_tracks(filenames)
 
+    def _prepare_tracks(self, filenames: list[str]) -> list:
+        """Читает битрейт каждого файла → [(filename, filepath, bitrate), ...]."""
         prepared = []
         for filename in filenames:
             filepath = os.path.join(self.music_dir, filename)
@@ -157,8 +197,66 @@ class Station:
                 print(f"[radio:{self.id}] Не удалось прочитать {filename}: {e}")
                 bitrate = 128_000
             prepared.append((filename, filepath, bitrate))
-
         return prepared
+
+    def apply_library_change(self, library: dict) -> None:
+        """Применяет изменившийся набор файлов папки без остановки эфира: из оставшейся части
+        текущей очереди убираются пропавшие треки, новые вставляются в случайные места.
+        Уже сыгранные треки и текущий трек не трогаются."""
+        prev = self._library
+        self._library = library
+        # Файлы, перезаписанные под тем же именем, — битрейт мог поменяться, перечитываем
+        changed = {n for n, sig in library.items() if prev is not None and n in prev and prev[n] != sig}
+
+        with self.song_cache_lock:
+            old_names = {s["filename"] for s in self.song_cache}
+        names = {s["filename"] for s in self.refresh_song_cache(set(library))}
+
+        if prev is not None:
+            if names == old_names and not changed:
+                return
+            added, removed = names - old_names, old_names - names
+            print(f"[radio:{self.id}] Библиотека изменилась: +{len(added)} / -{len(removed)} / ~{len(changed)}")
+            for n in sorted(added):
+                print(f"[radio:{self.id}]   + {clean_title(n)}")
+            for n in sorted(removed):
+                print(f"[radio:{self.id}]   - {clean_title(n)}")
+
+        def is_valid(track) -> bool:
+            filename, filepath, _ = track
+            return (filename in names and filename not in changed
+                    and filepath == os.path.join(self.music_dir, filename))
+
+        def split_queue() -> tuple[list, list, set]:
+            head = self.play_queue[:self.queue_index + 1]  # сыгранные + текущий
+            kept = [t for t in self.play_queue[self.queue_index + 1:] if is_valid(t)]
+            present = {t[0] for t in head if t[1] == os.path.join(self.music_dir, t[0])}
+            present |= {t[0] for t in kept}
+            return head, kept, present
+
+        with self.queue_lock:
+            _, _, present = split_queue()
+        # Теги читаем вне блокировки — это дисковый I/O
+        prepared = self._prepare_tracks(sorted(names - present))
+
+        with self.queue_lock:
+            # Пока читали теги, broadcaster мог уйти вперёд — делим очередь заново
+            head, kept, present = split_queue()
+            for track in prepared:
+                if track[0] not in present:
+                    kept.insert(random.randint(0, len(kept)), track)
+            self.play_queue = head + kept
+
+            # Заготовленная следующая очередь собрана из старого набора файлов
+            self.library_version += 1
+            next_was_ready = self.next_queue_ready.is_set()
+            if next_was_ready:
+                self.next_queue_ready.clear()
+                self.next_queue = []
+
+        if next_was_ready:
+            self._request_next_queue()
+        self.notify_title_change()
 
     def get_current_queue(self) -> list[dict]:
         """Возвращает список оставшихся треков в текущей очереди."""
@@ -215,14 +313,24 @@ class Station:
                 removed = self._audio_prebuffer.popleft()
                 self._audio_prebuffer_size -= len(removed)
 
+    def _request_next_queue(self) -> None:
+        """Запускает фоновую генерацию следующей очереди, если она ещё не готова и не готовится."""
+        with self._queue_gen_lock:
+            if self._queue_generation_in_progress or self.next_queue_ready.is_set():
+                return
+            self._queue_generation_in_progress = True
+        threading.Thread(target=self._prepare_next_queue_safe, daemon=True).start()
+
     def _prepare_next_queue_safe(self) -> None:
         """Генерирует следующую очередь в фоновом потоке (с safe-флагом)."""
         try:
             print(f"[radio:{self.id}] Генерация следующей очереди...")
+            version = self.library_version
             new_queue = self.build_prepared_queue()
             if new_queue:
                 with self.queue_lock:
-                    self.play_queue = new_queue
+                    self.next_queue = new_queue
+                    self.next_queue_version = version
                     self.next_queue_ready.set()
                 print(f"[radio:{self.id}] Следующая очередь готова ({len(new_queue)} треков)")
             else:
@@ -235,33 +343,41 @@ class Station:
         print(f"[radio:{self.id}] Стрим «{self.name}» запущен. Папка: {self.music_dir}")
 
         self.refresh_song_cache()
-        self.play_queue = self.build_prepared_queue()
+        initial_queue = self.build_prepared_queue()
+        with self.queue_lock:
+            self.play_queue = initial_queue
+            self.queue_index = 0
         self.next_queue_ready.clear()
 
-        while not shutdown_event.is_set():
-            if not self.play_queue:
+        while not self._stopping():
+            with self.queue_lock:
+                queue_empty = not self.play_queue
+            if queue_empty:
                 print(f"[radio:{self.id}] Нет MP3-файлов, жду 10 сек...")
-                shutdown_event.wait(10)
+                self.stop_event.wait(10)
                 self.refresh_song_cache()
-                self.play_queue = self.build_prepared_queue()
+                new_queue = self.build_prepared_queue()
+                with self.queue_lock:
+                    self.play_queue = new_queue
+                    self.queue_index = 0
                 continue
 
-            for self.queue_index in range(len(self.play_queue)):
-                if shutdown_event.is_set():
-                    break
+            # Очередь может меняться на ходу (LibraryWatcher добавляет/убирает треки после
+            # текущего), поэтому длину перечитываем перед каждым треком
+            while not self._stopping():
+                with self.queue_lock:
+                    if self.queue_index >= len(self.play_queue):
+                        break
+                    filename, filepath, bitrate = self.play_queue[self.queue_index]
+                    queue_total = len(self.play_queue)
 
-                filename, filepath, bitrate = self.play_queue[self.queue_index]
-
-                # Если это предпоследний трек — запускаем генерацию следующей очереди в фоне
-                if self.queue_index == len(self.play_queue) - 2 and len(self.play_queue) >= 2:
-                    with self._queue_gen_lock:
-                        if not self._queue_generation_in_progress and not self.next_queue_ready.is_set():
-                            self._queue_generation_in_progress = True
-                            threading.Thread(target=self._prepare_next_queue_safe, daemon=True).start()
+                # С предпоследнего трека — генерируем следующую очередь в фоне
+                if self.queue_index >= queue_total - 2:
+                    self._request_next_queue()
 
                 self.current_song["title"]   = clean_title(filename)
                 self.current_song["bitrate"] = bitrate // 1000
-                print(f"[radio:{self.id}] ▶ {self.current_song['title']}  [{self.current_song['bitrate']} kbps  ({self.queue_index + 1}/{len(self.play_queue)})]")
+                print(f"[radio:{self.id}] ▶ {self.current_song['title']}  [{self.current_song['bitrate']} kbps  ({self.queue_index + 1}/{queue_total})]")
                 if TITLE_DELAY > 0:
                     threading.Timer(TITLE_DELAY, self.notify_title_change).start()
                 else:
@@ -274,7 +390,7 @@ class Station:
                         start_time = time.perf_counter()
                         bytes_sent = 0
 
-                        while not shutdown_event.is_set():
+                        while not self._stopping():
                             chunk = f.read(CHUNK)
                             if not chunk:
                                 break
@@ -310,7 +426,7 @@ class Station:
                             elapsed  = time.perf_counter() - start_time
                             drift    = expected - elapsed
                             if drift > 0.02:
-                                shutdown_event.wait(drift)
+                                self.stop_event.wait(drift)
 
                 except Exception as e:
                     print(f"[radio:{self.id}] Ошибка при чтении {filename}: {e}")
@@ -318,26 +434,56 @@ class Station:
                 # Инжектируем тишину в очереди клиентов сразу после конца трека.
                 # Это гарантирует, что HTTP-поток не прерывается пока broadcaster открывает
                 # следующий файл. 8 фреймов ≈ 208 мс — достаточно для любых задержек ФС.
-                if not shutdown_event.is_set():
-                    try:
-                        next_br = self.play_queue[self.queue_index + 1][2] // 1000
-                    except IndexError:
-                        next_br = bitrate // 1000
+                if not self._stopping():
+                    with self.queue_lock:
+                        next_idx = self.queue_index + 1
+                        next_track = self.play_queue[next_idx] if next_idx < len(self.play_queue) else None
+                    next_br = (next_track[2] if next_track else bitrate) // 1000
                     self._broadcast_silence(next_br, 8)
 
-            # Очередь закончилась — ждём, пока следующая будет готова
-            if not shutdown_event.is_set():
-                print(f"[radio:{self.id}] Очередь закончилась, жду следующую...")
-                while not shutdown_event.is_set() and not self.next_queue_ready.is_set():
-                    # Гоним тишину с реальным темпом, чтобы клиенты не потеряли поток
-                    self._broadcast_silence(self.current_song['bitrate'], 10)
-                    shutdown_event.wait(10 * 1152 / 44100)  # ~261 мс = длительность 10 фреймов
+                with self.queue_lock:
+                    self.queue_index += 1
 
-                if shutdown_event.is_set():
+            if self._stopping():
+                break
+
+            with self.queue_lock:
+                self.queue_index = max(len(self.play_queue) - 1, 0)
+
+            # Очередь закончилась — ждём следующую, собранную из актуального набора файлов
+            print(f"[radio:{self.id}] Очередь закончилась, жду следующую...")
+            next_fresh = False
+            while not self._stopping():
+                with self.queue_lock:
+                    next_fresh = (self.next_queue_ready.is_set()
+                                  and self.next_queue_version == self.library_version)
+                if next_fresh:
                     break
+                if self.next_queue_ready.is_set():
+                    # Библиотека изменилась, пока очередь готовилась — собираем заново
+                    self.next_queue_ready.clear()
+                with self._queue_gen_lock:
+                    generating = self._queue_generation_in_progress
+                if not generating:
+                    with self.song_cache_lock:
+                        library_empty = not self.song_cache
+                    if library_empty:
+                        break  # все файлы удалены — внешний цикл подождёт их появления
+                    self._request_next_queue()
 
-                self.next_queue_ready.clear()
+                # Гоним тишину с реальным темпом, чтобы клиенты не потеряли поток
+                self._broadcast_silence(self.current_song['bitrate'], 10)
+                self.stop_event.wait(10 * 1152 / 44100)  # ~261 мс = длительность 10 фреймов
+
+            if self._stopping():
+                break
+
+            with self.queue_lock:
+                self.play_queue = self.next_queue if next_fresh else []
+                self.next_queue = []
                 self.queue_index = 0
+            self.next_queue_ready.clear()
+            if next_fresh:
                 print(f"[radio:{self.id}] Новая очередь готова ({len(self.play_queue)} треков)")
 
         print(f"[radio:{self.id}] Broadcaster остановлен.")
@@ -348,8 +494,10 @@ class Station:
 stations: dict[str, Station] = {}
 
 
-def load_station_configs() -> list[dict]:
-    """Читает JSON-файлы кастомных станций из STATIONS_DIR (см. README)."""
+def load_station_configs() -> list[tuple[str, dict | None]]:
+    """Читает JSON-файлы кастомных станций из STATIONS_DIR (см. README).
+    Возвращает [(station_id, config), ...]; config = None, если файл не удалось прочитать
+    (например, его как раз сохраняют) — тогда у запущенной станции остаётся прежний конфиг."""
     configs = []
     if not os.path.isdir(STATIONS_DIR):
         return configs
@@ -370,8 +518,11 @@ def load_station_configs() -> list[dict]:
         try:
             with open(path, encoding='utf-8') as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("ожидается JSON-объект")
         except Exception as e:
             print(f"[radio] Не удалось прочитать {fname}: {e}")
+            configs.append((station_id, None))
             continue
 
         name = data.get('name') or station_id
@@ -381,16 +532,131 @@ def load_station_configs() -> list[dict]:
             print(f"[radio] Станция «{fname}»: поле 'files' должно быть списком строк, игнорирую его")
             files = None
 
-        configs.append({"id": station_id, "name": name, "music_dir": music_dir, "files": files})
+        configs.append((station_id, {"name": name, "music_dir": music_dir, "files": files}))
 
     return configs
 
 
+def start_station(station: Station) -> None:
+    threading.Thread(target=station.broadcaster, daemon=True).start()
+
+
 def load_stations() -> None:
-    stations.clear()
-    stations[DEFAULT_STATION_ID] = Station(DEFAULT_STATION_ID, DEFAULT_STATION_NAME, MUSIC_DIR, files=None)
-    for cfg in load_station_configs():
-        stations[cfg["id"]] = Station(cfg["id"], cfg["name"], cfg["music_dir"], files=cfg["files"])
+    global stations
+    loaded = {DEFAULT_STATION_ID: Station(DEFAULT_STATION_ID, DEFAULT_STATION_NAME, MUSIC_DIR, files=None)}
+    for station_id, cfg in load_station_configs():
+        if cfg is not None:
+            loaded[station_id] = Station(station_id, cfg["name"], cfg["music_dir"], files=cfg["files"])
+    stations = loaded
+
+
+def _scan_signature(path: str, extension: str) -> dict | None:
+    """{имя: (размер, mtime)} для файлов с нужным расширением; None — папки нет."""
+    try:
+        with os.scandir(path) as it:
+            result = {}
+            for entry in it:
+                if entry.name.lower().endswith(extension) and entry.is_file():
+                    # os.stat, а не entry.stat(): на Windows последний берёт размер из каталога,
+                    # который для дописываемого файла отстаёт
+                    st = os.stat(entry.path)
+                    result[entry.name] = (st.st_size, st.st_mtime_ns)
+            return result
+    except OSError:
+        return None
+
+
+class LibraryWatcher:
+    """Раз в RELOAD_INTERVAL сек проверяет STATIONS_DIR и папки с музыкой и применяет
+    изменения на лету: новые/удалённые/изменённые станции, добавленные/удалённые треки.
+
+    Опрос, а не inotify — надёжно работает в Docker с bind-mount и без лишних зависимостей.
+    Новый MP3 попадает в эфир только когда его размер и mtime не менялись между двумя
+    проверками — так недокачанный файл не уйдёт в эфир обрезанным."""
+
+    def __init__(self):
+        self._stations_sig: dict | None = None
+        self._prev_scan: dict[str, dict] = {}   # music_dir → скан с прошлой проверки
+        self._applied: dict[str, dict] = {}     # music_dir → набор файлов, отданный станциям
+
+    def run(self) -> None:
+        print(f"[radio] Слежу за изменениями файлов (раз в {RELOAD_INTERVAL:g} сек)")
+        while not shutdown_event.wait(RELOAD_INTERVAL):
+            try:
+                self.check()
+            except Exception as e:
+                print(f"[radio] Ошибка при проверке изменений: {e}")
+
+    def check(self) -> None:
+        self._check_station_configs()
+        self._check_music_dirs()
+
+    def _check_station_configs(self) -> None:
+        global stations
+        sig = _scan_signature(STATIONS_DIR, '.json') or {}
+        if sig == self._stations_sig:
+            return
+        first_check = self._stations_sig is None
+        self._stations_sig = sig
+        if first_check:
+            return  # при старте станции уже загружены load_stations()
+
+        current = stations
+        updated = {DEFAULT_STATION_ID: current[DEFAULT_STATION_ID]}
+        for station_id, cfg in load_station_configs():
+            station = current.get(station_id)
+            if cfg is None:
+                if station is not None:
+                    updated[station_id] = station
+                continue
+            if station is None:
+                station = Station(station_id, cfg["name"], cfg["music_dir"], files=cfg["files"])
+                print(f"[radio] Новая станция «{station.name}»: /{station_id}/")
+                start_station(station)
+            else:
+                station.reconfigure(cfg["name"], cfg["music_dir"], cfg["files"])
+            updated[station_id] = station
+
+        # Подменяем словарь целиком, чтобы роуты не видели его в промежуточном состоянии
+        stations = updated
+
+        for station_id, station in current.items():
+            if station_id not in updated:
+                print(f"[radio] Станция «{station.name}» удалена: /{station_id}/")
+                station.stop()
+
+    def _check_music_dirs(self) -> None:
+        current = stations
+        music_dirs = {s.music_dir for s in current.values()}
+
+        for music_dir in music_dirs:
+            scan = _scan_signature(music_dir, '.mp3')
+            if scan is None:
+                scan = {}
+            prev = self._prev_scan.get(music_dir)
+            applied = self._applied.get(music_dir)
+            self._prev_scan[music_dir] = scan
+
+            if prev is None or applied is None:
+                # Папку видим впервые — берём как есть
+                library = dict(scan)
+            else:
+                library = {}
+                for name, sig in scan.items():
+                    if prev.get(name) == sig:
+                        library[name] = sig            # файл не менялся с прошлой проверки
+                    elif name in applied:
+                        library[name] = applied[name]  # уже в эфире, ждём, пока допишется
+            self._applied[music_dir] = library
+
+            for station in current.values():
+                if station.music_dir == music_dir and station._library != library:
+                    station.apply_library_change(library)
+
+        for music_dir in list(self._prev_scan):
+            if music_dir not in music_dirs:
+                del self._prev_scan[music_dir]
+                self._applied.pop(music_dir, None)
 
 
 def _get_station(station_id: str | None) -> Station:
@@ -443,7 +709,7 @@ def stream(station_id=None):
         try:
             consecutive_empty = 0
             max_consecutive_empty = 400  # ~20 сек без данных = отключение
-            while not shutdown_event.is_set():
+            while not shutdown_event.is_set() and not station.stop_event.is_set():
                 try:
                     chunk = client_q.get(timeout=0.05)
                     consecutive_empty = 0
@@ -539,7 +805,7 @@ def title_stream(station_id=None):
         })
         yield f"data: {initial_payload}\n\n"
         try:
-            while not shutdown_event.is_set():
+            while not shutdown_event.is_set() and not station.stop_event.is_set():
                 try:
                     data = q.get(timeout=1.0)
                     yield data
@@ -624,6 +890,8 @@ def api_stations():
 def signal_handler(sig, frame):
     print("\n[radio] Завершение...")
     shutdown_event.set()
+    for station in stations.values():
+        station.stop()
     sys.exit(0)
 
 
@@ -634,7 +902,10 @@ if __name__ == '__main__':
     load_stations()
 
     for station in stations.values():
-        threading.Thread(target=station.broadcaster, daemon=True).start()
+        start_station(station)
+
+    if RELOAD_INTERVAL > 0:
+        threading.Thread(target=LibraryWatcher().run, daemon=True).start()
 
     print(f"\n  Выбор станции: http://localhost:{PORT}/")
     for station in stations.values():

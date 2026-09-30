@@ -36,6 +36,7 @@ Copy `.env.example` to `.env` and adjust as needed.
 | `TITLE_DELAY_SECONDS`  | `5`            | SSE title update delay in seconds. Compensates for browser audio buffering. Set to `0` to disable. |
 | `STATION_NAME`         | `MLP Radio`    | Display name of the general station                                        |
 | `STATIONS_DIR`         | `stations`     | Directory scanned for custom station config files (see [Radio Stations](#radio-stations)) |
+| `RELOAD_INTERVAL_SECONDS` | `5`        | How often music folders and `STATIONS_DIR` are checked for changes (see [Live reload](#live-reload)). Set to `0` to disable. |
 
 ### Method 1 — Windows Launcher
 
@@ -73,7 +74,7 @@ The server always runs a **general station**, streaming everything found in `MUS
 
 ### Defining a custom station
 
-Drop a `.json` file into the `stations/` directory (configurable via `STATIONS_DIR`). The filename (without extension) becomes the station's URL id, so `stations/retro.json` is served at `/retro/`. Restart the server to pick up new or changed files.
+Drop a `.json` file into the `stations/` directory (configurable via `STATIONS_DIR`). The filename (without extension) becomes the station's URL id, so `stations/retro.json` is served at `/retro/`. New, changed, and deleted station files are picked up automatically, no restart needed (see [Live reload](#live-reload)).
 
 ```json
 {
@@ -111,6 +112,19 @@ Inside Docker, `music_dir` must be a Unix-style path pointing inside the contain
 If you omit `music_dir` and `files` entirely (`{ "name": "MLP FM" }`), the station falls back to `MUSIC_DIR` and scans every `.mp3` in it — i.e. it becomes a full clone of the general station's playlist, just under its own name, URL, and independent shuffle/listener stream.
 
 Station ids must be alphanumeric (`-`/`_` allowed) and can't collide with reserved routes (`pages`, `stream`, `title`, `status`, `playlist`, `obs`, `static`, `api`, `general`).
+
+### Live reload
+
+The server re-checks every music folder and `STATIONS_DIR` every `RELOAD_INTERVAL_SECONDS` (default `5`) and applies changes on the fly, without dropping listeners:
+
+- **Tracks added / removed / replaced** — the rest of the current queue is updated in place: missing tracks are dropped, new ones are inserted at random positions. The track currently playing and the ones already played are left alone.
+- **Station file added** — the new station starts broadcasting and shows up in the selector.
+- **Station file changed** — a new `name` is applied immediately; a changed `music_dir` / `files` rebuilds the upcoming queue.
+- **Station file deleted** — the station stops and its listeners are disconnected.
+
+A new MP3 goes on air only after its size and modification time stay the same between two checks, so a file that is still uploading isn't played truncated. A station file that fails to parse (e.g. caught mid-save) is ignored and the station keeps its previous config until the file is valid again.
+
+Changes are detected by polling rather than filesystem events, so it works the same on Docker bind mounts. In Docker this means editing `./music` or `./stations` on the host is enough; no rebuild or restart needed.
 
 ### Station URLs
 
