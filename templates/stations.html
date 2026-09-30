@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title id="pageTitle">Радио-станции</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+    font-family: 'Segoe UI', sans-serif; color: #fff;
+    padding: 24px;
+  }
+  .card {
+    background: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .card-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 24px;
+  }
+  .card-icon { font-size: 28px; }
+  h1 { font-size: 20px; }
+  .subtitle {
+    font-size: 13px;
+    color: #a8b2d1;
+    margin: -18px 0 20px;
+  }
+  .station-list {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .station-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.05);
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .station-item:hover { background: rgba(100,255,218,0.12); }
+  .station-item:active { transform: scale(0.98); }
+  .station-icon {
+    font-size: 22px;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .station-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .station-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .station-path {
+    font-size: 12px;
+    font-family: monospace;
+    color: #64ffda;
+  }
+  .empty {
+    text-align: center;
+    padding: 24px;
+    color: #556;
+    font-size: 14px;
+  }
+  .back-link {
+    display: inline-block;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #556;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .back-link:hover { color: #a8b2d1; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <span class="card-icon">📻</span>
+    <h1 id="heading">Радио-станции</h1>
+  </div>
+  <div class="subtitle" id="subtitle">Выберите станцию</div>
+  <div class="station-list" id="stationList">
+    {% for station in stations %}
+    <a class="station-item" href="/{{ station.id }}/">
+      <span class="station-icon">🎵</span>
+      <span class="station-info">
+        <span class="station-name">{{ station.name }}</span>
+        <span class="station-path">/{{ station.id }}/</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  <a href="/pages" class="back-link" id="pagesLink">→ /pages</a>
+</div>
+
+<script>
+function detectLanguage() {
+  const nav = navigator.language || navigator.userLanguage || '';
+  return nav.toLowerCase().startsWith('ru') ? 'ru' : 'en';
+}
+
+const LANG = detectLanguage();
+document.documentElement.lang = LANG;
+
+const i18n = {
+  ru: {
+    pageTitle: 'Радио-станции',
+    heading: 'Радио-станции',
+    subtitle: 'Выберите станцию',
+    pagesLink: '→ Список страниц'
+  },
+  en: {
+    pageTitle: 'Radio Stations',
+    heading: 'Radio Stations',
+    subtitle: 'Choose a station',
+    pagesLink: '→ All pages'
+  }
+};
+
+const loc = i18n[LANG] || i18n.en;
+document.getElementById('pageTitle').textContent = loc.pageTitle;
+document.getElementById('heading').textContent = loc.heading;
+document.getElementById('subtitle').textContent = loc.subtitle;
+document.getElementById('pagesLink').textContent = loc.pagesLink;
+</script>
+</body>
+</html>

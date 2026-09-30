@@ -18,7 +18,8 @@
   'use strict';
 
   var audio        = document.getElementById('a');
-  var STREAM_URL   = '/stream';
+  var STATION_ID   = {{ station_id | tojson }};
+  var STREAM_URL   = '/' + STATION_ID + '/stream';
   var RECONNECT_MS = 2000;   // базовая задержка перед переподключением
   var STALL_MS     = 8000;   // секунд без движения currentTime → принудительный рестарт
   var CHECK_MS     = 1000;   // период watchdog-тика
@@ -140,7 +141,7 @@
   // ── SSE: если сервер жив и присылает треки, но аудио молчит — рестарт ──
   (function connectSSE() {
     try {
-      var es = new EventSource('/title-stream');
+      var es = new EventSource('/' + STATION_ID + '/title-stream');
       es.onmessage = function () {
         // Сервер живой. Если мы при этом не играем — принудительно рестартуем
         if (audio.paused || audio.ended || audio.readyState < 2) {

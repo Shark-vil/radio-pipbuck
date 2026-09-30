@@ -31,6 +31,13 @@
   .page-list {
     display: flex; flex-direction: column; gap: 10px;
   }
+  .section-title {
+    font-size: 13px;
+    color: #556;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 24px 0 10px;
+  }
   .page-item {
     display: flex; flex-direction: column; gap: 4px;
     padding: 14px 16px;
@@ -68,6 +75,17 @@
     <h1 id="heading">Страницы</h1>
   </div>
   <div class="page-list" id="pageList"></div>
+
+  <h2 class="section-title" id="stationsHeading">Станции</h2>
+  <div class="page-list">
+    {% for station in stations %}
+    <a class="page-item" href="/{{ station.id }}/">
+      <span class="page-path">/{{ station.id }}/</span>
+      <span class="page-desc">{{ station.name }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
   <a href="/" class="back-link" id="backLink">← Назад</a>
 </div>
 
@@ -84,27 +102,31 @@ const i18n = {
   ru: {
     pageTitle: 'Страницы — MLP Radio',
     heading: 'Страницы',
+    stationsHeading: 'Станции',
     back: '← На главную',
     pages: [
-      { path: '/',           desc: 'Главный плеер — воспроизведение, регулировка громкости, список треков и текущая очередь.' },
-      { path: '/title-page', desc: 'Минималистичная страница с названием текущего трека. Удобна для оверлеев в стриминге.' },
-      { path: '/obs',        desc: 'Источник для OBS Browser Source — прозрачный фон, только аудио, встроенный watchdog для непрерывного захвата.' },
-      { path: '/status',     desc: 'JSON-статус сервера: текущий трек, битрейт, количество слушателей.' },
-      { path: '/playlist',   desc: 'JSON-данные: текущий трек, очередь воспроизведения и полный список песен.' },
-      { path: '/stream',     desc: 'Прямой аудиопоток MP3 — можно открыть в любом медиаплеере по этому адресу.' },
+      { path: '/',                 desc: 'Выбор станции.' },
+      { path: '/<станция>/',       desc: 'Плеер станции — воспроизведение, регулировка громкости, список треков и текущая очередь.' },
+      { path: '/<станция>/title-page', desc: 'Минималистичная страница с названием текущего трека. Удобна для оверлеев в стриминге.' },
+      { path: '/<станция>/obs',        desc: 'Источник для OBS Browser Source — прозрачный фон, только аудио, встроенный watchdog для непрерывного захвата.' },
+      { path: '/<станция>/status',     desc: 'JSON-статус станции: текущий трек, битрейт, количество слушателей.' },
+      { path: '/<станция>/playlist',   desc: 'JSON-данные: текущий трек, очередь воспроизведения и полный список песен станции.' },
+      { path: '/<станция>/stream',     desc: 'Прямой аудиопоток MP3 станции — можно открыть в любом медиаплеере по этому адресу.' },
     ]
   },
   en: {
     pageTitle: 'Pages — MLP Radio',
     heading: 'Pages',
-    back: '← Back to player',
+    stationsHeading: 'Stations',
+    back: '← Back to home',
     pages: [
-      { path: '/',           desc: 'Main player — playback controls, volume slider, song list, and current queue.' },
-      { path: '/title-page', desc: 'Minimal now-playing display showing only the current track title. Handy for streaming overlays.' },
-      { path: '/obs',        desc: 'OBS Browser Source page — transparent background, audio only, built-in watchdog for uninterrupted capture.' },
-      { path: '/status',     desc: 'JSON server status: current track, bitrate, and listener count.' },
-      { path: '/playlist',   desc: 'JSON data: current track, playback queue, and full song list.' },
-      { path: '/stream',     desc: 'Raw MP3 audio stream — open this URL in any media player to tune in.' },
+      { path: '/',                    desc: 'Station selector.' },
+      { path: '/<station>/',          desc: 'Station player — playback controls, volume slider, song list, and current queue.' },
+      { path: '/<station>/title-page', desc: 'Minimal now-playing display showing only the current track title. Handy for streaming overlays.' },
+      { path: '/<station>/obs',        desc: 'OBS Browser Source page — transparent background, audio only, built-in watchdog for uninterrupted capture.' },
+      { path: '/<station>/status',     desc: 'JSON station status: current track, bitrate, and listener count.' },
+      { path: '/<station>/playlist',   desc: 'JSON data: current track, playback queue, and full song list of the station.' },
+      { path: '/<station>/stream',     desc: 'Raw MP3 audio stream of the station — open this URL in any media player to tune in.' },
     ]
   }
 };
@@ -116,12 +138,13 @@ document.getElementById('backLink').textContent = loc.back;
 
 const list = document.getElementById('pageList');
 loc.pages.forEach(p => {
-  const a = document.createElement('a');
-  a.className = 'page-item';
-  a.href = p.path;
-  a.innerHTML = `<span class="page-path">${p.path}</span><span class="page-desc">${p.desc}</span>`;
-  list.appendChild(a);
+  const el = document.createElement(p.path.includes('<') ? 'div' : 'a');
+  el.className = 'page-item';
+  if (el.tagName === 'A') el.href = p.path;
+  el.innerHTML = `<span class="page-path">${p.path}</span><span class="page-desc">${p.desc}</span>`;
+  list.appendChild(el);
 });
+document.getElementById('stationsHeading').textContent = loc.stationsHeading;
 </script>
 </body>
 </html>

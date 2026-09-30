@@ -17,6 +17,9 @@ env/
 # Docker
 music/
 
+# Custom radio stations (user-specific playlists)
+/stations/*.json
+
 # IDE
 .vscode/
 .idea/
